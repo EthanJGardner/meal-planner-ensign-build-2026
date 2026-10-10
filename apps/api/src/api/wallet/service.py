@@ -1,5 +1,6 @@
 """Paying for the cart with one payment that covers every store."""
 
+import logging
 from collections.abc import Callable
 from typing import Protocol
 
@@ -13,6 +14,8 @@ from api.shopping.index import PriceIndex
 from api.shopping.schemas import CheckoutQuote, PaidCheckout
 from api.shopping.service import store_totals
 from api.wallet.link import WalletError
+
+logger = logging.getLogger(__name__)
 
 
 class Wallet(Protocol):
@@ -111,5 +114,10 @@ async def pay_cart(
 
     items = [item for store_items in by_store.values() for item in store_items]
     for item in items:
-        await cart.remove(item.store, item.upc)
+        try:
+            await cart.remove(item.store, item.upc)
+        except ShoppingError:
+            # The payment went through. A row left in the cart must not turn
+            # that into an error, or the model could try to pay a second time.
+            logger.exception("Paid item %s at %s is still in the cart", item.upc, item.store)
     return paid, items, left_out

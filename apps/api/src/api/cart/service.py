@@ -93,6 +93,8 @@ class CartService:
             reasons.append("unsure_match")
         if bought.packs > MAX_PACKS_PER_ITEM:
             reasons.append("large_quantity")
+        if need.assumed_quantity:
+            reasons.append("unknown_quantity")
 
         item = CartItem(
             store=listing.store,

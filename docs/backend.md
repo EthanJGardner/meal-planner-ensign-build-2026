@@ -13,11 +13,11 @@ React web app ──/api/*──► FastAPI (apps/api) ──► Kong :54321 ─
                 <user JWT> forwards it              └──────────► rest (PostgREST) ──► Postgres :54322
                               │                                    RLS: auth.uid() = user_id
                               ├──► Qdrant :6333 (recipe vectors)
-                              └──► AWS Bedrock agent (not wired yet)
+                              └──► shopping agent ──► mock stores :8100, Bedrock model, Link
 ```
 
 - **Supabase is the CRUD backend.** Postgres holds the app tables, GoTrue handles accounts, and PostgREST exposes the tables over HTTP.
-- **FastAPI is the proxy and the agentic server.** The web app sends all data requests to FastAPI. FastAPI never queries Supabase as itself for user data. It forwards the user's own token, so Postgres row level security (RLS) decides what that user can see.
+- **FastAPI is the proxy and the agentic server.** The web app sends all data requests to FastAPI. FastAPI forwards the user's own token, so Postgres row level security (RLS) decides what that user can see. The one exception is the buying agent's cart and orders, which only the server may write: there it uses the service key and sets the user id itself.
 - **The web app only talks to Supabase for login.** It uses `supabase-js` with the anon key to sign up and sign in, then sends the access token to FastAPI as `Authorization: Bearer <token>`.
 
 ## Quick start
@@ -38,7 +38,7 @@ pnpm dev:api
 pnpm dev
 ```
 
-On first start, the one-shot `db-schema` service applies [supabase/schema.sql](../supabase/schema.sql) automatically, once auth is up. It then exits, so `Exited (0)` next to it in `docker compose ps -a` is normal.
+On every start, the one-shot `db-schema` service brings the database up to date once auth is up: [supabase/schema.sql](../supabase/schema.sql) on a new database, then any file in [supabase/migrations](../supabase/migrations) that hasn't run yet. It then exits, so `Exited (0)` next to it in `docker compose ps -a` is normal.
 
 Stop the stack with `docker compose down`. Add `-v` to also wipe all local data: users, app tables **and the recipes in Qdrant**, which then need ingesting again. To reset only the database, see [Changing the schema](#changing-the-schema).
 
@@ -116,7 +116,7 @@ Rules of thumb:
 
 ## Database schema
 
-All app tables live in [supabase/schema.sql](../supabase/schema.sql). Recipes themselves live in Qdrant and are referenced by `recipe_id` (text).
+The app tables are defined in [supabase/schema.sql](../supabase/schema.sql) (the baseline) plus the numbered files in [supabase/migrations](../supabase/migrations). Recipes themselves live in Qdrant and are referenced by `recipe_id` (text).
 
 | Table | Purpose |
 |---|---|
@@ -125,7 +125,7 @@ All app tables live in [supabase/schema.sql](../supabase/schema.sql). Recipes th
 | `user_allergens` | A user's allergens picked from the common list. **Add-only.** |
 | `user_custom_allergens` | A user's other allergens, as short cleaned terms. **Add-only.** |
 | `my_allergies` (view) | Both kinds in one list, for the UI and for FastAPI |
-| `preferences` | Diet styles, likes/dislikes, household size, budget, plan length (one row per user) |
+| `preferences` | Diet styles, likes/dislikes, household size, budget, plan length, and the shopping mode (`manual` or `auto`). One row per user. |
 | `nutrition_goals` | Daily macro targets plus optional body stats for the calculator (one row per user) |
 | `meal_option_sessions` | One generation run, with snapshots of the allergies, preferences and goals it used |
 | `meal_options` | Candidate recipes produced by a session, with compliance results and status |
@@ -134,9 +134,11 @@ All app tables live in [supabase/schema.sql](../supabase/schema.sql). Recipes th
 | `favorites`, `feedback` | Hearts and like/dislike per recipe |
 | `recipe_popularity` (view) | Aggregate favorite counts. Exposes no individual's data. |
 | `grocery_lists`, `grocery_items` | One list per plan, built by `build_grocery_list`. Users can tick, edit, add and remove items. |
-| `orders`, `order_items` | What the buying agent bought. Read-only for users. |
+| `cart_items` | The buying agent's cart, one per grocery list. Read-only for users. |
+| `orders` | One row per run of the buying agent, and so per payment: status, mode, totals in cents, the payment reference and the run's summary. Read-only for users. |
+| `order_items` | One row per product bought, with its store, UPC, the store's own order number and the grocery item it covers. Read-only for users. |
 
-`build_grocery_list(plan_id)` is a database function, called with `db.rpc("build_grocery_list", {"p_plan_id": ...})`. It adds up the ingredients of the plan's accepted slots, scaled from each recipe's servings to the plan's household size. Calling it again **replaces the list**, including items the user added and their ticks. It refuses once the plan has an order that isn't failed or cancelled.
+`build_grocery_list(plan_id)` is a database function, called with `db.rpc("build_grocery_list", {"p_plan_id": ...})`. It adds up the ingredients of the plan's accepted slots, scaled from each recipe's servings to the plan's household size. Calling it again **replaces the list**, including items the user added and their ticks. Rebuilding also empties the list's cart. It refuses while a run is going or once something was paid for (an order that isn't `failed`, `cancelled` or `unpaid`).
 
 Safety rules enforced by the database itself, not just by app code:
 
@@ -148,27 +150,29 @@ Safety rules enforced by the database itself, not just by app code:
 - **A new slot must come from a stored meal option** with the same owner and recipe.
 - **Nutrition targets must be consistent.** Calories must be ≥ 1200, and macro calories (4/4/9 per gram) must be within 10% of the calorie target.
 - **One accepted meal per slot.** Rejected and replaced slots stay as history, so you can add a replacement without deleting the old row.
-- **Orders are read-only for users.** Only the buying agent writes them, through `ServiceDB`, and it must set `user_id` from the verified token itself.
+- **The cart and the orders are read-only for users.** Only the buying agent writes them, through `ServiceDB`, and it sets `user_id` from the verified token itself. The server decides prices and pack counts, so a browser must not be able to edit them.
+- **One run at a time per grocery list.** A unique index allows a single `pending` or `shopping` order per list, so two runs can never both pay for it.
+- **A payment is saved once.** Order lines are unique per store, store order number and UPC, so saving the same payment again changes nothing.
 - **Deleting a user deletes all their data.** Everything cascades from `auth.users`.
 
 Known limit, accepted for the MVP: the two meal-option rules catch mistakes in our own code, not a user writing to Supabase directly with their own token. Such a user can insert a `meal_options` row marked safe, or change a slot's recipe after creating it.
 
 ### Changing the schema
 
-The `db-schema` service applies `schema.sql` **only when `public.profiles` doesn't exist yet**. On a database that already has the tables it prints `schema already applied, skipping`, so an edited `schema.sql`, or one you just pulled, changes nothing until you do one of these. The file isn't idempotent, so don't re-run the whole of it against existing tables.
+Add a new numbered file to `supabase/migrations/`, such as `0002_add_something.sql`, then run `docker compose up -d --wait`. The `db-schema` service applies each file that isn't yet listed in the `migrations.applied` table, in file-name order. A file and its record are committed together, so a file that fails leaves nothing half done and is tried again on the next start. Teammates get the change by pulling and starting the stack.
 
-- **Throwaway local data:** reset the database. This deletes users and app data but keeps the recipes in Qdrant:
-  ```powershell
-  docker compose rm -s -f db auth rest kong meta studio db-schema
-  docker volume rm meal-planner_db_data meal-planner_db_config
-  docker compose up -d --wait
-  ```
-- **Keep local data:** edit `schema.sql`, and also apply the change by hand, for example:
-  ```powershell
-  Get-Content change.sql -Raw | docker compose exec -T db psql -U postgres -v ON_ERROR_STOP=1 --single-transaction
-  ```
+- **Don't edit `schema.sql` or a migration that has been pushed.** A database that already ran it will not pick the edit up. Write a new migration instead.
+- `schema.sql` is the baseline. It is applied only when `public.profiles` doesn't exist yet, and isn't idempotent.
+- A migration runs as plain SQL in one transaction, so it can't use commands that refuse to run inside one, such as `create index concurrently`.
+- See what has run with `docker compose logs db-schema`, or `select * from migrations.applied`.
 
-Tell your teammates when you change the schema so they can reset or apply it too. If changes become frequent, move to numbered files in `supabase/migrations/`.
+If a migration fails because your local database is older than the baseline in the repo, start over. This deletes users and app data but keeps the recipes in Qdrant:
+
+```powershell
+docker compose rm -s -f db auth rest kong meta studio db-schema
+docker volume rm meal-planner_db_data meal-planner_db_config
+docker compose up -d --wait
+```
 
 New tables need `alter table … enable row level security` plus policies. Without RLS, any logged-in user can read every row.
 
@@ -181,7 +185,8 @@ New tables need `alter table … enable row level security` plus policies. Witho
 | FastAPI returns `401` | Missing, expired or non-user token. Sign in again in the web app. |
 | PostgREST `42501` | RLS blocked it: wrong `user_id`, a forbidden operation (such as deleting an allergy), or `ServiceDB` vs `UserDB` mixed up. |
 | PostgREST `PGRST205` "Could not find the table" | Table doesn't exist, or PostgREST hasn't reloaded its schema cache. Run `docker compose exec db psql -U postgres -c "notify pgrst, 'reload schema'"`. |
-| Schema change not showing up, or a table from a teammate's commit is missing | `db-schema` skipped because the tables already exist (`docker compose logs db-schema`). See [Changing the schema](#changing-the-schema). |
+| Schema change not showing up, or a table from a teammate's commit is missing | Run `docker compose up -d --wait` and read `docker compose logs db-schema`. An edit to `schema.sql` or to a migration that already ran is ignored. See [Changing the schema](#changing-the-schema). |
+| `db-schema` exits with an error | A migration failed; the log names the file and the SQL error. Nothing from that file was applied. |
 | `22023` "contains a word that is not allowed" | The text filter on custom allergens and preference lists rejected a term. See the safety rules above. |
 | `uv` warns `VIRTUAL_ENV ... does not match` | A different env (such as conda) is active. Harmless: uv uses the repo's `.venv`. |
 
@@ -192,7 +197,7 @@ The shopping agent takes a grocery list, compares prices across six mock stores,
 ```
 shopping agent (apps/api) ──HTTP──► storefront (apps/storefront, :8100) ──► seed/*.csv, stores.yaml
    │    │                                   │
-   │    └──► cart (in memory for now)       └──► Stripe sandbox (PaymentIntent)
+   │    └──► cart and orders (Supabase)     └──► Stripe sandbox (PaymentIntent)
    │
    └──MCP──► Link CLI (npx @stripe/link-cli) ──► your approval in the Link app
 ```
@@ -247,14 +252,16 @@ POST again with the payment credential
 | Module | What it does |
 |---|---|
 | `shopping/` | Storefront client, price index built from the store feeds, unit conversion, `compare_prices` and `plan_basket`. All plain code. |
-| `cart/` | Cart items and the manual/auto rules. |
+| `cart/` | Cart items, the manual/auto rules, and where the cart is kept (Supabase, or memory for tests and the command line). |
 | `wallet/` | Pays a store's checkout through Stripe's Link CLI, over its MCP server. |
 | `agent/` | The tool loop, the tools, and the model providers. |
+| `runs/` | The HTTP routes, turning a grocery list into the agent's shopping list, and keeping the order row up to date during a run. |
+| `recipes/` | Reads recipes from Qdrant by id. |
 
 - **Tools:** `list_stores`, `search_products`, `compare_prices`, `plan_basket`, `add_to_cart`, `remove_from_cart`, `view_cart`, and `checkout` when a wallet is connected.
 - **The server sets the price and pack count.** The model only names a store, a UPC and the ingredient it is for.
 - **Manual mode:** everything is saved as `proposed` until the user approves the basket.
-- **Auto mode:** items go straight to `in_cart`, except these, which stay `proposed` for the user's check: store-brand items, replacements for something out of stock, unsure matches, more than 10 packs of one item, and anything that would pass the weekly budget. Auto with no budget runs as manual.
+- **Auto mode:** items go straight to `in_cart`, except these, which stay `proposed` for the user's check: store-brand items, replacements for something out of stock, unsure matches, more than 10 packs of one item, items whose amount wasn't known, and anything that would pass the budget. Auto with no budget runs as manual.
 - **The mode is enforced in `cart/service.py`,** not in the prompt. The agent has one `add_to_cart` tool in both modes.
 - **The agent pays in both modes.** At the end of a run it calls `checkout` once, which pays for everything in the cart, proposed or not, with a single payment. Your approval in the Link app is the check on it. Paid items leave the cart and the run's summary lists one order per store.
 
@@ -280,6 +287,8 @@ Settings (all optional, in `.env`):
 | Variable | Default | Notes |
 |---|---|---|
 | `STOREFRONT_URL` | `http://localhost:8100` | Where the agent finds the stores |
+| `QDRANT_URL` | `http://localhost:6333` | Where the recipes are |
+| `QDRANT_COLLECTION` | `recipes` | The collection `scripts/ingest_recipes.py` loads |
 | `LLM_PROVIDER` | `scripted` | `scripted` runs offline with no model. `bedrock` uses the Converse API. |
 | `BEDROCK_MODEL_ID` | none | Required for `bedrock`. There is no default model. |
 | `AWS_REGION` | none | Region for Bedrock |
@@ -290,7 +299,62 @@ Settings (all optional, in `.env`):
 | `LINK_MCP_COMMAND` | `npx -y @stripe/link-cli@0.27.0 --mcp` | The version is pinned on purpose |
 | `LINK_APPROVAL_TIMEOUT_SECONDS` | `600` | How long to wait for your approval |
 
-Try it from the command line, with the storefront running. The cart is kept in memory and discarded when the command exits. Add `--no-pay` to stop at the saved cart:
+### API routes (`runs/`)
+
+All of these need `Authorization: Bearer <access token>`. Someone else's list or order answers `404`.
+
+| Route | What it does |
+|---|---|
+| `POST /api/grocery-lists/{list_id}/shopping-runs` | Starts the agent on the list and streams its events. Body: `{"mode": "manual"}` or `{"mode": "auto"}`; leave it out to use `preferences.shopping_mode`. |
+| `POST /api/shopping-runs` | Takes chosen recipes, saves them as a plan with its grocery list, and starts the agent on it in the same call. See below. |
+| `GET /api/grocery-lists/{list_id}/cart` | The cart with totals per store, delivery fees included |
+| `POST /api/grocery-lists/{list_id}/cart/approve` | Moves every proposed item into the cart |
+| `DELETE /api/grocery-lists/{list_id}/cart/items/{store}/{upc}` | Removes one item |
+| `GET /api/orders` | The user's runs, newest first |
+| `GET /api/orders/{order_id}` | One run with the lines it bought and its final summary |
+
+What a run shops for:
+
+- Every grocery item that isn't ticked (`checked`) and that an earlier run hasn't already paid for. If nothing is left, the answer is `409`.
+- The amount is `quantity_estimate` and `unit`. An item with no usable amount is bought as one pack and held for the user's check (`unknown_quantity`). So is a name that is on the list in two different units.
+- The budget is the plan's own `budget`. The user's weekly budget in `preferences` is not used here.
+- Each run starts from an empty cart, so a second run never adds to what the first one left.
+
+From recipes to the buyer (`POST /api/shopping-runs`):
+
+```json
+{
+  "meals": [
+    {"recipe_id": 38, "day_index": 0, "meal_type": "dinner"},
+    {"recipe_id": 42, "day_index": 1, "meal_type": "dinner"}
+  ],
+  "household_size": 2,
+  "budget_cents": 15000,
+  "mode": "auto"
+}
+```
+
+- `recipe_id` is the recipe's id in Qdrant. Only `meals` is required. An unknown id answers `404`, two meals in one slot `422`, and Qdrant being down `503`; nothing is saved in those cases.
+- The server reads the ingredients itself. It saves a session, one option per recipe, the plan and its slots, calls `build_grocery_list`, and starts the run the same way the route above does.
+- **One pack of each ingredient.** The recipes' amounts have no units ("4" blueberries, "1/4" sugar), and over a quarter of the recipes have a different number of amounts than ingredient names, so the amounts are not used. Each ingredient is saved once on the grocery list with `quantity_estimate` 1, however many recipes use it. That is a set amount, not an unknown one, so auto mode doesn't hold it for a check.
+- Calling `build_grocery_list` again on such a plan clears the amounts. The items are then treated as unknown amounts and held.
+- **The recipes are not checked for allergens here.** They are stored as `allergen_safe`, which the slots table requires, so only send recipes that already passed the allergen check. That check is being built separately.
+- The mock stores sell a small range. A real recipe usually has ingredients no store stocks; the summary lists them as not found.
+
+Following a run:
+
+- The answer is a `text/event-stream`. Each event has its type in `event:` and JSON in `data:`. The first is `run_created` with the `order_id` and the `grocery_list_id`; the rest are the agent's own events (`run_started`, `message`, `tool_call`, `tool_result`, `cart_updated`, `approval_needed`, `reminder`, `error`), ending with `done` and the summary.
+- It is a `POST` and needs a header, so the browser's `EventSource` can't open it. Read it with `fetch` and `response.body.getReader()`.
+- **The run doesn't stop if the browser goes away.** A payment in progress still has to be recorded. After a reload, read `GET /api/orders/{order_id}` and the cart.
+- The order row follows the run: `shopping` while it runs, `placed` as soon as a payment goes through, `unpaid` if it finished with nothing paid (the cart is saved), `failed` if it broke off.
+- A list can have one run at a time; a second answers `409`, and so do cart changes while a run is going. If the server stops mid-run, the row stays `shopping` until the user's next run, which closes any run that has been silent for 15 minutes as `failed`.
+- If a payment goes through but can't be saved after three tries, the stream sends an `error` event with the payment reference, and the whole payment is written to the server log.
+
+Whoever is logged in to Link on the machine running the API approves and pays for every user's order. That is fine for a demo and nothing else.
+
+### Command line
+
+Try the agent without the API or Supabase, with the storefront running. The cart is kept in memory and discarded when the command exits. Add `--no-pay` to stop at the saved cart:
 
 ```powershell
 uv run --package api python -m api.agent apps/api/tests/sample_list.json --mode auto --budget 150
@@ -302,6 +366,31 @@ Tests:
 uv run --package api pytest apps/api
 uv run --package storefront pytest apps/storefront
 ```
+
+The API tests use stand-ins for Supabase, the stores, Stripe, Link and the model, so they need nothing running. Two more sets are opt-in and need the stack up. Both sign up throwaway users and delete them afterwards; add `KEEP_LIVE_TEST_DATA=1` to keep the rows and look at them in Studio.
+
+| What | Command | Real | Stand-ins |
+|---|---|---|---|
+| The routes against Supabase | `$env:RUN_SUPABASE_TESTS = "1"; uv run --package api pytest apps/api/tests/test_supabase_live.py` | Supabase | Stores' Stripe, Link, model |
+| A run paid in the Stripe sandbox | `$env:RUN_STRIPE_SANDBOX_TEST = "1"; uv run --package api pytest apps/api/tests/test_sandbox_live.py -s` | Supabase, the stores' checkout, one sandbox payment of about $48 | Link (Stripe's test helper grants the token, so no phone approval), model |
+
+The sandbox test needs `STRIPE_SECRET_KEY` and `STRIPE_PROFILE_ID` in `.env`. It asks Stripe for the PaymentIntent the saved order points at and checks it succeeded for the same amount. With `-s` it prints the payment reference.
+
+### The whole path by hand, with Link
+
+`scripts/try_shopping_run.py` does what the web app will: it signs up a throwaway user, gives it a plan and a grocery list, starts a run on the running API and prints it live, then shows the saved order and deletes the user. With payments on you approve once in the Link app.
+
+```powershell
+docker compose up -d --wait
+pnpm dev:storefront          # in one terminal
+pnpm dev:api                 # in another
+uv run --package api python scripts/try_shopping_run.py --budget 150
+```
+
+- `--recipes 38 42` sends those recipe ids to `POST /api/shopping-runs` instead of building a list from the file. Qdrant has to hold the recipes.
+- `--keep` leaves the user and its rows in Supabase, and prints the login to use.
+- `--mode manual`, a different list file, or `--api` for another address are optional.
+- To stop at the saved cart and pay nothing, start the API with `PAYMENTS_ENABLED=false`. Add `LLM_PROVIDER=scripted` to run without a model.
 
 What has and hasn't run for real:
 
@@ -324,6 +413,6 @@ $env:RUN_STRIPE_SANDBOX_TEST = "1"; uv run --package storefront pytest apps/stor
 
 ## Not built yet
 
-- **Cart and agent routes.** The cart has no Supabase table and neither the cart nor the agent has an HTTP route. Both need the login code below to load first.
-- **The API's database code does not load.** `db.py` imports `supabase`, which is not installed or declared in `apps/api/pyproject.toml`, and `main.py` does not create the shared HTTP client (`app.state.http`) that `db.py` expects. `auth.py` and `settings.py` load only because `pyjwt` and `pydantic-settings` are pulled in by other packages; declare them too.
-- **CRUD endpoints** for the tables above. Only `/api/health` exists today.
+- **Web UI for the buying agent.** The routes above have no screen yet: starting a run, the live progress, the cart and the orders. Sign-in in the web app is not built either.
+- **Paying for a saved cart without a new run.** The agent pays at the end of its own run. Items a store couldn't sell stay in the cart until the next run, which starts over for whatever is still unbought.
+- **CRUD endpoints** for the other tables (preferences, allergies, plans and the rest). Besides the routes above, only `/api/health` exists.

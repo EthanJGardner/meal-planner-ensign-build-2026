@@ -69,6 +69,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # Starts once the schema is up to date, so its first read of the tables is
+      # complete. It also tells `docker compose up --wait` that db-schema exiting
+      # is expected, not a failure.
+      db-schema:
+        condition: service_completed_successfully
     environment:
       PGRST_DB_URI: postgres://authenticator:postgres@db:5432/postgres
       PGRST_DB_ANON_ROLE: anon
@@ -117,12 +122,16 @@ services:
     ports:
       - "54323:3000"
 
-  # One-shot: applies supabase/schema.sql once auth has created auth.users, then
-  # tells PostgREST to reload. It exits when done, so "Exited (0)" is the normal state.
-  # Skips if public.profiles already exists, so `docker compose up` is safe to repeat.
-  # That also means an edited schema.sql is NOT picked up by a database that
-  # already has the tables. To re-apply from scratch (deletes users and app data,
-  # keeps the Qdrant recipes):
+  # One-shot: brings the database schema up to date once auth has created
+  # auth.users, then tells PostgREST to reload. It runs on every `docker compose up`
+  # and exits when done, so "Exited (0)" is the normal state.
+  #   1. Baseline: supabase/schema.sql, only if public.profiles doesn't exist yet.
+  #   2. Migrations: each supabase/migrations/*.sql not yet listed in the
+  #      migrations.applied table, in file-name order, each in one transaction.
+  # To change the schema, add a new numbered file in supabase/migrations. Don't
+  # edit schema.sql or a migration that has been pushed: databases that already
+  # ran them won't pick the edit up.
+  # To start over (deletes users and app data, keeps the Qdrant recipes):
   #   docker compose rm -s -f db auth rest kong meta studio db-schema
   #   docker volume rm meal-planner_db_data meal-planner_db_config
   #   docker compose up -d --wait
@@ -138,17 +147,36 @@ services:
       PGHOST: db
       PGUSER: postgres
       PGPASSWORD: postgres
+      # Hides the "already exists, skipping" notices on repeat runs.
+      PGOPTIONS: --client-min-messages=warning
     volumes:
-      - ./supabase/schema.sql:/schema.sql:ro
+      - ./supabase:/supabase:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
+        set -e
         if [ "$$(psql -tAc "select to_regclass('public.profiles') is not null")" = "t" ]; then
-          echo "schema already applied, skipping"
+          echo "baseline already applied, skipping schema.sql"
         else
-          psql -v ON_ERROR_STOP=1 --single-transaction -f /schema.sql || exit 1
-          echo "schema applied"
+          psql -q -v ON_ERROR_STOP=1 --single-transaction -f /supabase/schema.sql
+          echo "baseline applied: schema.sql"
         fi
+        # Not in the public schema, so PostgREST doesn't expose it.
+        psql -q -v ON_ERROR_STOP=1 \
+          -c "create schema if not exists migrations" \
+          -c "create table if not exists migrations.applied (name text primary key, applied_at timestamptz not null default now())"
+        for file in /supabase/migrations/*.sql; do
+          [ -e "$$file" ] || continue
+          name="$$(basename "$$file")"
+          if [ "$$(psql -tAc "select exists (select 1 from migrations.applied where name = '$$name')")" = "t" ]; then
+            continue
+          fi
+          # The migration and its record commit together, or not at all.
+          psql -q -v ON_ERROR_STOP=1 --single-transaction -f "$$file" \
+            -c "insert into migrations.applied (name) values ('$$name')"
+          echo "migration applied: $$name"
+        done
+        echo "schema is up to date"
         psql -c "notify pgrst, 'reload schema'"
     restart: "no"
 

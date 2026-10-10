@@ -240,6 +240,26 @@ async def test_one_payment_covers_every_store_in_the_cart(http, stripe):
     assert "Walmart, QuickCart" in note and "$15.09" in note
 
 
+async def test_a_paid_item_stuck_in_the_cart_does_not_hide_the_payment(http, stripe, monkeypatch):
+    client, index, cart = await cart_with(http, ("walmart", EGGS, 2))
+
+    async def unreachable(store, upc):
+        raise ShoppingError("The cart could not be reached")
+
+    monkeypatch.setattr(cart, "remove", unreachable)
+
+    paid, items, _ = await pay_cart(
+        cart=cart,
+        index=index,
+        client=client,
+        wallet=wallet_for(FakeLink(http)),
+        approval_needed=lambda quote, url: None,
+    )
+
+    # Reported as paid, so nothing asks for the money a second time.
+    assert (paid.total_cents, stripe.charges, len(items)) == (578, [578], 1)
+
+
 async def test_a_store_that_cannot_sell_is_left_out_and_the_rest_is_paid_once(http, stripe):
     client, index, cart = await cart_with(
         http, ("walmart", EGGS, 2), ("bulkbarn-club", CLUB_EGGS, 1), ("target", EGGS, 1)

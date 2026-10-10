@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     # Mock stores (apps/storefront).
     storefront_url: str = "http://localhost:8100"
 
+    # Recipes, loaded into Qdrant by scripts/ingest_recipes.py.
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_collection: str = "recipes"
+
     # Shopping agent. "scripted" runs offline with no model.
     llm_provider: Literal["scripted", "bedrock"] = "scripted"
     # Required for the bedrock provider. There is no default model.

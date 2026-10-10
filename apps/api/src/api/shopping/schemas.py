@@ -93,6 +93,9 @@ class ListItem(BaseModel):
     name: str = Field(min_length=1)
     quantity: float = Field(gt=0)
     unit: str = ""
+    # True when the grocery list had no usable amount and quantity is a guess.
+    # The item is then held for the user's check.
+    assumed_quantity: bool = False
 
 
 class PriceRow(BaseModel):

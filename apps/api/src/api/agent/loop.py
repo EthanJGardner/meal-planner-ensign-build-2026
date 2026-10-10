@@ -147,7 +147,7 @@ async def run_shopping_agent(
     progress: asyncio.Queue[Event] = asyncio.Queue()
     toolbox = Toolbox(client, index, shopping_list, cart, wallet, progress.put_nowait)
     prompt = system_prompt(can_pay=wallet is not None)
-    listed = [item.model_dump() for item in request.items]
+    listed = [item.model_dump(exclude={"assumed_quantity"}) for item in request.items]
     messages: list[Message] = [UserMessage(json.dumps({"shopping_list": listed}))]
 
     finish_reason = "step_limit"

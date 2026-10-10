@@ -2,9 +2,9 @@
 
     uv run --package api python -m api.agent apps/api/tests/sample_list.json --mode auto --budget 150
 
-The cart lives in memory and is gone when the command exits. This is the way to try
-the flow until the cart and agent routes exist. Paying goes through Stripe's Link
-CLI in test mode; pass --no-pay to stop at the saved cart.
+The cart lives in memory and is gone when the command exits, and nothing is saved to
+Supabase: for that, start a run through the API (api.runs). Paying goes through
+Stripe's Link CLI in test mode; pass --no-pay to stop at the saved cart.
 """
 
 import argparse

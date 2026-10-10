@@ -14,6 +14,7 @@ HoldReason = Literal[
     "over_budget",  # adding it would pass the weekly budget
     "unsure_match",  # the product may not be what the ingredient means
     "large_quantity",  # more packs than the per-item cap
+    "unknown_quantity",  # the grocery list had no usable amount, so one pack was assumed
 ]
 
 

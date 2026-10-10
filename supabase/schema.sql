@@ -1,5 +1,7 @@
 -- =====================================================================
 -- AI Meal Planner: Supabase schema
+-- This is the baseline. Later changes are in supabase/migrations/*.sql:
+-- add a new numbered file there instead of editing this one.
 -- Applied automatically by the one-shot `db-schema` service in
 -- docker-compose.yaml, after auth is healthy (it creates auth.users).
 -- That service skips if public.profiles already exists. The file itself
