@@ -24,3 +24,4 @@ __pycache__
 
 # Data
 data/
+!.claude/skills/impeccable/scripts/data/
