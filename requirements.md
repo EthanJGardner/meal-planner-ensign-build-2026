@@ -65,6 +65,7 @@ These features are required for a working demo and must ship first:
 - Calorie and macro goal support
 - User preferences input (household size, preference and household setup form)
 - Meal viewing and selection, including a best-fit recommendation with alternatives, recipe details, and ingredient quantities
+- Meal variety, with a cool-off period so the same meal isn't repeated too soon in the plan
 - Grocery list generation
 - A simple, usable demo interface
 
@@ -165,6 +166,7 @@ The final navigation and visual design should remain simple enough for the hacka
 - The plan should expose nutrition and cost estimates when those values are available.
 - After a plan is generated, the system shall show a summary/stats section aggregating the plan's nutrition intake (e.g. calories, macros) and total cost against the user's goals and budget.
 - The system shall return alternatives when a user rejects a meal.
+- The system shall enforce a cool-off period between repeats of the same meal, so the same meal does not reappear within a set number of days of the plan.
 
 ### 5.4 Feedback and meal replacement
 
