@@ -104,6 +104,7 @@ The product may be organized around the following sections:
 - Grocery
 - Recipe
 - Ingredients, including estimated cost
+- Plan summary/stats, showing aggregated nutrition intake and cost across the plan
 
 The final navigation and visual design should remain simple enough for the hackathon demo.
 
@@ -139,6 +140,7 @@ The final navigation and visual design should remain simple enough for the hacka
 - The MVP shall generate breakfast, lunch, and dinner meals for the household plan.
 - Generated meals should include at least a name, meal type, servings, ingredients, quantities, preparation instructions, and estimated cooking time.
 - The plan should expose nutrition and cost estimates when those values are available.
+- After a plan is generated, the system shall show a summary/stats section aggregating the plan's nutrition intake (e.g. calories, macros) and total cost against the user's goals and budget.
 - The system shall return alternatives when a user rejects a meal.
 
 ### 5.4 Feedback and meal replacement
