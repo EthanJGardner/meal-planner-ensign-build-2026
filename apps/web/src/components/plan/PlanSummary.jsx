@@ -26,18 +26,26 @@ export function PlanSummary({ week }) {
 
   return (
     <dl className="stat-grid">
-      <Stat
-        label="Estimated cost"
-        value={`$${summary.cost.toFixed(2)}`}
-        detail={
-          summary.allowedBudget
-            ? summary.overBudget
-              ? `$${summary.overBudgetBy.toFixed(2)} over the $${summary.allowedBudget.toFixed(2)} share for these days`
-              : `Inside the $${summary.allowedBudget.toFixed(2)} share for these days`
-            : 'No budget set'
-        }
-        variant={summary.overBudget ? 'alert' : undefined}
-      />
+      {summary.unpriced ? (
+        <Stat
+          label="Estimated cost"
+          value="—"
+          detail="Planner recipes come without prices, so there is no cost estimate for this week."
+        />
+      ) : (
+        <Stat
+          label="Estimated cost"
+          value={`$${summary.cost.toFixed(2)}`}
+          detail={
+            summary.allowedBudget
+              ? summary.overBudget
+                ? `$${summary.overBudgetBy.toFixed(2)} over the $${summary.allowedBudget.toFixed(2)} share for these days`
+                : `Inside the $${summary.allowedBudget.toFixed(2)} share for these days`
+              : 'No budget set'
+          }
+          variant={summary.overBudget ? 'alert' : undefined}
+        />
+      )}
       <Stat
         label="Calories per person/day"
         value={summary.plannedDays ? summary.calories.toLocaleString() : '—'}

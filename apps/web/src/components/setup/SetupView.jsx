@@ -1,8 +1,11 @@
 import logo from '../../assets/pic-logo.png'
 import { CURRENT_WEEK } from '../../lib/constants'
 import { isWeekEmpty } from '../../lib/planner'
+import { useAccountSetup } from '../../hooks/useAccountSetup'
 import { useHousehold } from '../../hooks/useHousehold'
 import { useMealPlan } from '../../hooks/useMealPlan'
+import { AccountAllergySelector } from '../account/AccountAllergySelector'
+import { AccountSaveBar } from '../account/AccountSaveBar'
 import { AllergySelector } from '../household/AllergySelector'
 import { PreferencesForm } from '../household/PreferencesForm'
 import { Banner } from '../common/Banner'
@@ -13,8 +16,19 @@ import { MyRecipesSection } from '../recipes/MyRecipesSection'
 
 export function SetupView({ onSeePlan }) {
   const { preferences, resetPreferences } = useHousehold()
-  const { plan, status, error, notice, note, generatePlan, dismissError } =
-    useMealPlan()
+  const {
+    plan,
+    status,
+    error,
+    notice,
+    note,
+    sampleOffered,
+    generatePlan,
+    chooseSamplePlan,
+    dismissError,
+  } = useMealPlan()
+  // Null for guests.
+  const account = useAccountSetup()
 
   const loading = status === 'loading'
   const hasPlan = Boolean(plan) && !isWeekEmpty(plan, CURRENT_WEEK)
@@ -51,8 +65,9 @@ export function SetupView({ onSeePlan }) {
             generatePlan()
           }}
         >
-          <AllergySelector />
-          <PreferencesForm />
+          {account ? <AccountAllergySelector /> : <AllergySelector />}
+          <PreferencesForm account={Boolean(account)} />
+          {account ? <AccountSaveBar /> : null}
 
           <div className="panel__actions">
             <button
@@ -66,7 +81,11 @@ export function SetupView({ onSeePlan }) {
                   ? 'Rebuild my plan'
                   : 'Generate meal plan'}
             </button>
-            <button type="button" className="button button--large" onClick={resetPreferences}>
+            <button
+              type="button"
+              className="button button--large"
+              onClick={account ? account.resetSetup : resetPreferences}
+            >
               Reset to defaults
             </button>
           </div>
@@ -76,6 +95,17 @@ export function SetupView({ onSeePlan }) {
       {error ? (
         <Banner variant="error" title="We could not build that plan" onDismiss={dismissError}>
           {error}
+          {sampleOffered ? (
+            <p className="mt-3 mb-0">
+              <button
+                type="button"
+                className="inline-flex items-center rounded-md border border-line bg-card px-3 py-1 text-sm font-semibold text-ink hover:bg-panel"
+                onClick={chooseSamplePlan}
+              >
+                Use a sample plan instead
+              </button>
+            </p>
+          ) : null}
         </Banner>
       ) : null}
 
@@ -86,7 +116,13 @@ export function SetupView({ onSeePlan }) {
       ) : null}
 
       {loading ? (
-        <LoadingState label="Building a plan around your allergies and budget…" />
+        <LoadingState
+          label={
+            account
+              ? 'Saving your setup, then choosing meals and checking each one against your allergies and diet. This takes about half a minute.'
+              : 'Building a plan around your allergies and budget…'
+          }
+        />
       ) : null}
 
       <section className="panel panel--next">
@@ -111,8 +147,9 @@ export function SetupView({ onSeePlan }) {
           <>
             <h2 className="panel__title">No plan yet</h2>
             <p className="panel__lede">
-              Fill in your household above and generate a plan. Your preferences
-              and choices stay in this browser, so a refresh will not lose them.
+              {account
+                ? 'Fill in your household above and generate a plan. Your setup is saved to your account when you generate, and kept in this browser too.'
+                : 'Fill in your household above and generate a plan. Your preferences and choices stay in this browser, so a refresh will not lose them.'}
             </p>
           </>
         )}

@@ -36,6 +36,23 @@ export function useGroceryList() {
           const key = `${ingredient.name.toLowerCase()}|${ingredient.unit}`
           const existing = merged.get(key)
 
+          // Planner recipes give names only. Their items carry no amount and
+          // no price, and are never counted as free.
+          if (ingredient.quantity == null) {
+            if (existing) existing.usedIn.add(recipe.name)
+            else {
+              merged.set(key, {
+                key,
+                name: ingredient.name,
+                unit: '',
+                quantity: null,
+                estimatedCost: null,
+                usedIn: new Set([recipe.name]),
+              })
+            }
+            continue
+          }
+
           if (existing) {
             existing.quantity = round(
               existing.quantity + ingredient.quantity * servings,
@@ -64,7 +81,9 @@ export function useGroceryList() {
 
     return {
       items,
-      total: round(items.reduce((sum, item) => sum + item.estimatedCost, 0)),
+      total: round(items.reduce((sum, item) => sum + (item.estimatedCost ?? 0), 0)),
+      // True when some items have no price, so `total` is not the list's cost.
+      unpriced: items.some((item) => item.estimatedCost === null),
       mealCount,
       week,
     }

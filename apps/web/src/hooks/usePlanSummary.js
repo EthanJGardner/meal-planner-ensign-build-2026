@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { isNamesOnly } from '../lib/mealOptions'
 import { MEAL_SLOTS, WEEK_DAYS } from '../lib/constants'
 import {
   allowedWeekBudget,
@@ -44,6 +45,7 @@ export function usePlanSummary(week) {
         savedCount: 0,
         warnings: [],
         source: null,
+        unpriced: false,
       }
     }
 
@@ -56,6 +58,9 @@ export function usePlanSummary(week) {
     let fat = 0
     let filledSlots = 0
     let savedCount = 0
+    // Planner recipes come without prices, so a week holding one has no cost
+    // estimate at all rather than one that quietly counts them as free.
+    let unpriced = false
     const problemDays = []
 
     days.forEach((day, dayIndex) => {
@@ -67,6 +72,7 @@ export function usePlanSummary(week) {
       for (const slot of day) {
         if (slot.saved) savedCount += 1
         const recipe = findRecipe(plan, slot.recipe)
+        if (isNamesOnly(recipe)) unpriced = true
         if (!recipe?.nutritionPerServing) continue
         carbs += recipe.nutritionPerServing.carbs ?? 0
         fat += recipe.nutritionPerServing.fat ?? 0
@@ -102,6 +108,7 @@ export function usePlanSummary(week) {
       savedCount,
       warnings: plan.warnings ?? [],
       source: plan.source ?? null,
+      unpriced,
     }
   }, [plan, preferences, week])
 }

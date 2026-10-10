@@ -3,7 +3,7 @@ import { useHousehold } from '../../hooks/useHousehold'
 import { CheckoutPanel } from './CheckoutPanel'
 
 export function GroceryList() {
-  const { items, total, mealCount, week } = useGroceryList()
+  const { items, total, unpriced, mealCount, week } = useGroceryList()
   const { preferences } = useHousehold()
 
   return (
@@ -29,25 +29,38 @@ export function GroceryList() {
               <tr key={item.key}>
                 <th scope="row">{item.name}</th>
                 <td>
-                  {item.quantity} {item.unit}
+                  {item.quantity === null ? '—' : `${item.quantity} ${item.unit}`}
                 </td>
-                <td>${item.estimatedCost.toFixed(2)}</td>
+                <td>
+                  {item.estimatedCost === null ? '—' : `$${item.estimatedCost.toFixed(2)}`}
+                </td>
                 <td className="data-table__muted">{item.usedIn.join(', ')}</td>
               </tr>
             ))}
           </tbody>
-          <tfoot>
-            <tr>
-              <th scope="row" colSpan="2">
-                Estimated total
-              </th>
-              <td colSpan="2">${total.toFixed(2)}</td>
-            </tr>
-          </tfoot>
+          {unpriced ? null : (
+            <tfoot>
+              <tr>
+                <th scope="row" colSpan="2">
+                  Estimated total
+                </th>
+                <td colSpan="2">${total.toFixed(2)}</td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
 
-      <CheckoutPanel items={items} total={total} />
+      {unpriced ? (
+        <p className="mt-4 text-mute">
+          Items marked &ldquo;—&rdquo; come from planner recipes, which give
+          ingredient names only, with no amounts or prices. There is no total or
+          checkout for this list, so work out how much of each you need before you
+          shop.
+        </p>
+      ) : (
+        <CheckoutPanel items={items} total={total} />
+      )}
     </>
   )
 }

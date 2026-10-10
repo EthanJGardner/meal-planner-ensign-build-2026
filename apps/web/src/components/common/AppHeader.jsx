@@ -1,4 +1,5 @@
 import logo from '../../assets/text-logo.png'
+import { AccountMenu } from './AccountMenu'
 import { ThemeToggle } from './ThemeToggle'
 
 const STEPS = [
@@ -31,7 +32,10 @@ export function AppHeader({ view, onNavigate, groceryReady }) {
         ))}
       </nav>
 
-      <ThemeToggle />
+      <div className="ml-auto flex min-w-0 items-center gap-3">
+        <AccountMenu />
+        <ThemeToggle />
+      </div>
     </header>
   )
 }

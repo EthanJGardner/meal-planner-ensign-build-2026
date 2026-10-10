@@ -3,10 +3,23 @@ import { allergenConflicts } from '../../lib/allergySafety'
 import { isCustomRecipe } from '../../lib/customRecipes'
 import { alternativesFor, findRecipe, slotServings } from '../../lib/planner'
 import { recipeProblems } from '../../lib/mealFilters'
+import { isNamesOnly } from '../../lib/mealOptions'
 import { useHousehold } from '../../hooks/useHousehold'
 import { useMealPlan } from '../../hooks/useMealPlan'
 import { Modal } from '../common/Modal'
 import { RecipeDetail } from './RecipeDetail'
+
+// A planner recipe may lack its time or nutrition; only what it gives is shown.
+function namesOnlyMeta(recipe) {
+  const nutrition = recipe.nutritionPerServing
+  const parts = [
+    recipe.cookTimeMinutes == null ? null : `${recipe.cookTimeMinutes} min`,
+    nutrition?.calories == null ? null : `${nutrition.calories} kcal`,
+    nutrition?.protein == null ? null : `${nutrition.protein} g protein`,
+  ].filter(Boolean)
+  if (!parts.length) return 'No time or nutrition given'
+  return `${parts.join(' · ')}${nutrition ? ' per serving' : ''}`
+}
 
 export function RecipeModal({ week, day, slotIndex, onClose, onEditRecipe }) {
   const { preferences } = useHousehold()
@@ -102,11 +115,15 @@ export function RecipeModal({ week, day, slotIndex, onClose, onEditRecipe }) {
               <li key={option.name} className="alternatives__item">
                 <div>
                   <p className="alternatives__name">{option.name}</p>
-                  <p className="alternatives__meta">
-                    {option.cookTimeMinutes} min ·{' '}
-                    {option.nutritionPerServing.calories} kcal ·{' '}
-                    {option.nutritionPerServing.protein} g protein per serving
-                  </p>
+                  {isNamesOnly(option) ? (
+                    <p className="alternatives__meta">{namesOnlyMeta(option)}</p>
+                  ) : (
+                    <p className="alternatives__meta">
+                      {option.cookTimeMinutes} min ·{' '}
+                      {option.nutritionPerServing.calories} kcal ·{' '}
+                      {option.nutritionPerServing.protein} g protein per serving
+                    </p>
+                  )}
                 </div>
                 <button
                   type="button"

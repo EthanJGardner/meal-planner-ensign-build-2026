@@ -40,6 +40,7 @@ export function PlanView({ onEditSetup, onGoToGrocery }) {
     publishWeek,
     dismissNote,
     dismissError,
+    fromPlanner,
   } = useMealPlan()
 
   const [openRecipe, setOpenRecipe] = useState(null)
@@ -74,28 +75,40 @@ export function PlanView({ onEditSetup, onGoToGrocery }) {
       </div>
 
       <div className="action-bar">
-        <p
-          className={`action-bar__cost${
-            summary.overBudget ? ' is-over' : summary.cost ? ' is-ok' : ''
-          }`}
-        >
-          Estimated cost ${summary.cost.toFixed(2)}
-          {summary.allowedBudget
-            ? summary.overBudget
-              ? ` · over by $${summary.overBudgetBy.toFixed(2)}`
-              : ' · within budget'
-            : ''}
-        </p>
+        {summary.unpriced ? (
+          <p className="action-bar__cost">
+            No cost estimate: planner recipes come without prices
+          </p>
+        ) : (
+          <p
+            className={`action-bar__cost${
+              summary.overBudget ? ' is-over' : summary.cost ? ' is-ok' : ''
+            }`}
+          >
+            Estimated cost ${summary.cost.toFixed(2)}
+            {summary.allowedBudget
+              ? summary.overBudget
+                ? ` · over by $${summary.overBudgetBy.toFixed(2)}`
+                : ' · within budget'
+              : ''}
+          </p>
+        )}
 
-        <button type="button" className="button button--accent" onClick={() => fitToBudget(currentWeek)}>
-          Fit to budget
-        </button>
+        {/* A planner plan has no prices to fit, and only the planner's own
+            options to choose from, so it can't be rebuilt here. */}
+        {fromPlanner ? null : (
+          <button type="button" className="button button--accent" onClick={() => fitToBudget(currentWeek)}>
+            Fit to budget
+          </button>
+        )}
         <button type="button" className="button" onClick={() => publishWeek(currentWeek)}>
           Share this week
         </button>
-        <button type="button" className="button" onClick={() => regenerateWeek(currentWeek)}>
-          Remake this week
-        </button>
+        {fromPlanner ? null : (
+          <button type="button" className="button" onClick={() => regenerateWeek(currentWeek)}>
+            Remake this week
+          </button>
+        )}
         <button type="button" className="button" onClick={() => clearWeek(currentWeek)}>
           Clear this week
         </button>
@@ -142,7 +155,23 @@ export function PlanView({ onEditSetup, onGoToGrocery }) {
       <WeekTabs />
       <p className="week-status">{weekStatus(currentWeek)}</p>
 
-      {empty ? (
+      {empty && fromPlanner ? (
+        <section className="panel panel--empty">
+          <h2 className="panel__title">The planner&rsquo;s plan doesn&rsquo;t cover this week</h2>
+          <p className="panel__lede">
+            The planner chose meals for the days in your planning period. For
+            a longer plan, change the planning period in Setup and generate it
+            again.
+          </p>
+          <button
+            type="button"
+            className="button button--primary button--large"
+            onClick={onEditSetup}
+          >
+            Edit setup
+          </button>
+        </section>
+      ) : empty ? (
         <section className="panel panel--empty">
           <h2 className="panel__title">Nothing planned for this week yet</h2>
           <p className="panel__lede">
