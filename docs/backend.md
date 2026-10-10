@@ -167,7 +167,145 @@ New tables need `alter table … enable row level security` plus policies. Witho
 | Schema change not showing up | Init scripts only run on an empty volume. See [Changing the schema](#changing-the-schema). |
 | `uv` warns `VIRTUAL_ENV ... does not match` | A different env (such as conda) is active. Harmless: uv uses the repo's `.venv`. |
 
+## Mock stores and the shopping agent
+
+The shopping agent takes a grocery list, compares prices across six mock stores, saves products to a cart and pays for the basket with one payment. Payment runs in Stripe's sandbox only, so no real card is ever charged.
+
+```
+shopping agent (apps/api) ──HTTP──► storefront (apps/storefront, :8100) ──► seed/*.csv, stores.yaml
+   │    │                                   │
+   │    └──► cart (in memory for now)       └──► Stripe sandbox (PaymentIntent)
+   │
+   └──MCP──► Link CLI (npx @stripe/link-cli) ──► your approval in the Link app
+```
+
+### Storefront (`apps/storefront`)
+
+A separate FastAPI app that serves six stores from the seed files in `apps/storefront/seed/`. The agent only reaches it over HTTP.
+
+```powershell
+pnpm dev:storefront     # http://localhost:8100, also started by `pnpm dev`
+```
+
+| For | Routes |
+|---|---|
+| People | `/`, `/stores/{slug}`, `/stores/{slug}/search?q=`, `/stores/{slug}/products/{upc}` |
+| Agents (JSON) | `/api/stores`, `/api/stores/{slug}`, `/api/stores/{slug}/products?q=`, `/api/stores/{slug}/products/{upc}` |
+| Feeds | `/stores/{slug}/feed.json`, plus schema.org `Product` data on every product page |
+| Checkout | `POST /api/checkout` (one payment for baskets at one or more stores) |
+
+- Products are identified by 12-digit UPC-A codes, stored as text, in the company-internal range (starting with 4). Check digits are validated when the app starts, and a bad row stops it from starting.
+- A national-brand product has the same UPC at every store. A store-brand product has its own UPC and is matched to others by `equivalence_group`, as "comparable" rather than identical.
+- Prices are fixed and in whole cents. To change the catalog, edit the files in `apps/storefront/seed/`.
+
+### Checkout
+
+One checkout takes payment for baskets at several stores at once, with the Machine Payments Protocol. The buyer sends the products and quantities per store; each store prices its own basket.
+
+```
+POST /api/checkout
+  {"orders": [{"store": "walmart", "lines": [{"upc": "410020000223", "quantity": 2}]},
+              {"store": "target",  "lines": [{"upc": "410020000223", "quantity": 1}]}]}
+  → 402  WWW-Authenticate: Payment ... method="stripe" ...   (body has every store's quote and one total)
+POST again with the payment credential
+  → 200  one order per store, all on the same payment, with a Payment-Receipt header
+```
+
+- **One payment, one approval.** The total of every store's basket is charged once. Each store still gets its own order number.
+- Each store applies its own stock, order minimum and delivery fee. If any store can't sell its part, the checkout answers 409 and names every such store with the reason, so the buyer can leave those out and try again. Nothing is charged.
+- Card payments need a combined total of at least $0.50.
+- The challenge is bound to the request body, so a payment approved for one set of baskets can't pay for another.
+- All six stores charge the same Stripe sandbox account. The stores keep no record of orders; the payment shows in the Stripe sandbox dashboard.
+- Without the two Stripe settings below, checkout still validates a basket but answers 503.
+- **Only sandbox keys are accepted.** The app refuses to start with a live key or a non-test profile ID.
+
+| Variable | Notes |
+|---|---|
+| `STRIPE_SECRET_KEY` | Sandbox secret key (`sk_test_...`) |
+| `STRIPE_PROFILE_ID` | Sandbox Stripe profile ID (`profile_test_...`). Look it up with `curl https://api.stripe.com/v2/network/business_profiles/me -u sk_test_...: -H "Stripe-Version: 2026-07-29.preview"` |
+
+### Agent (`apps/api/src/api`)
+
+| Module | What it does |
+|---|---|
+| `shopping/` | Storefront client, price index built from the store feeds, unit conversion, `compare_prices` and `plan_basket`. All plain code. |
+| `cart/` | Cart items and the manual/auto rules. |
+| `wallet/` | Pays a store's checkout through Stripe's Link CLI, over its MCP server. |
+| `agent/` | The tool loop, the tools, and the model providers. |
+
+- **Tools:** `list_stores`, `search_products`, `compare_prices`, `plan_basket`, `add_to_cart`, `remove_from_cart`, `view_cart`, and `checkout` when a wallet is connected.
+- **The server sets the price and pack count.** The model only names a store, a UPC and the ingredient it is for.
+- **Manual mode:** everything is saved as `proposed` until the user approves the basket.
+- **Auto mode:** items go straight to `in_cart`, except these, which stay `proposed` for the user's check: store-brand items, replacements for something out of stock, unsure matches, more than 10 packs of one item, and anything that would pass the weekly budget. Auto with no budget runs as manual.
+- **The mode is enforced in `cart/service.py`,** not in the prompt. The agent has one `add_to_cart` tool in both modes.
+- **The agent pays in both modes.** At the end of a run it calls `checkout` once, which pays for everything in the cart, proposed or not, with a single payment. Your approval in the Link app is the check on it. Paid items leave the cart and the run's summary lists one order per store.
+
+- **A model that stops early is reminded.** If the model says it is done with a planned basket but an empty cart, or with an unpaid cart when paying is on, the code tells it what is missing and lets it continue, at most twice. After that the run ends as `stopped_early`. It is never reminded to pay after a payment was tried, so a declined payment doesn't send a second request.
+- **Trust the run's summary, not the model's message.** The summary in the `done` event is computed in code from the cart and the orders.
+
+### Paying (`wallet/`)
+
+The model only says "check out". Everything else about a payment is decided in code:
+
+1. The agent asks the checkout for every store's quote. A store that can't sell its part is left out, its items stay in the cart, and the rest goes ahead.
+2. It compares each store's quote with the cart. If any differ, nothing is paid.
+3. It calls Link's `mpp_pay` command through the MCP server, always with test mode on.
+4. Link asks you to approve once in the Link app. The run streams an `approval_needed` event with the total, the stores and the approval link, and checks every few seconds for up to 10 minutes.
+5. Once approved, Link pays with a one-time token. No card number reaches this code or the model.
+
+Setup, once per machine: Node, then `npx @stripe/link-cli auth login`. The Link account must be a US consumer account, and Link limits spending to $500 per request and per day, which now applies to the whole basket.
+
+The agent starts the Link CLI itself as a child process (`npx @stripe/link-cli --mcp`). Don't use `link-cli serve`: it listens on port 54321, which is the Supabase gateway.
+
+Settings (all optional, in `.env`):
+
+| Variable | Default | Notes |
+|---|---|---|
+| `STOREFRONT_URL` | `http://localhost:8100` | Where the agent finds the stores |
+| `LLM_PROVIDER` | `scripted` | `scripted` runs offline with no model. `bedrock` uses the Converse API. |
+| `BEDROCK_MODEL_ID` | none | Required for `bedrock`. There is no default model. |
+| `AWS_REGION` | none | Region for Bedrock |
+| `AWS_BEARER_TOKEN_BEDROCK` | none | A Bedrock API key. Optional: without it the usual AWS credentials are used. |
+| `AGENT_MAX_STEPS` | `25` | Model turns per run |
+| `AGENT_TOOL_TIMEOUT_SECONDS` | `10` | Per tool call, except `checkout` |
+| `PAYMENTS_ENABLED` | `true` | `false` stops every run at the saved cart |
+| `LINK_MCP_COMMAND` | `npx -y @stripe/link-cli@0.27.0 --mcp` | The version is pinned on purpose |
+| `LINK_APPROVAL_TIMEOUT_SECONDS` | `600` | How long to wait for your approval |
+
+Try it from the command line, with the storefront running. The cart is kept in memory and discarded when the command exits. Add `--no-pay` to stop at the saved cart:
+
+```powershell
+uv run --package api python -m api.agent apps/api/tests/sample_list.json --mode auto --budget 150
+```
+
+Tests:
+
+```powershell
+uv run --package api pytest apps/api
+uv run --package storefront pytest apps/storefront
+```
+
+What has and hasn't run for real:
+
+- The Bedrock provider has run for real (2026-10-10) with payments off, on the same 14-item list:
+
+  | Model | Result |
+  |---|---|
+  | `nvidia.nemotron-super-3-120b` | Correct basket in two of two runs, about 25 s each. This is the model set in `.env`. |
+  | `nvidia.nemotron-nano-3-30b` | Correct basket in one run, 28 s. |
+  | `nvidia.nemotron-nano-9b-v2` | One run claimed success with an empty cart; a second run was correct but took 125 s. |
+
+- A real model has paid end to end (2026-10-10): `nvidia.nemotron-super-3-120b` searched, planned, saved and paid a three-store basket through Link with one approval and one $47.60 sandbox payment.
+- Payment is tested against a fake Stripe and a fake Link server in the test suite.
+- The full flow has run for real in the Stripe sandbox (2026-10-10): the scripted agent paid for a three-store basket through Link with one approval and one $47.60 payment. Add `--pretty` to the command above for short readable output.
+- With the Stripe keys in `.env`, this makes one real sandbox payment without Link:
+
+```powershell
+$env:RUN_STRIPE_SANDBOX_TEST = "1"; uv run --package storefront pytest apps/storefront -k sandbox
+```
+
 ## Not built yet
 
-- **AWS Bedrock agent.** The plan is to invoke it from FastAPI with action groups set to *return control*. FastAPI would then run each tool call itself using `UserDB`, so the agent can only reach the current user's data.
-- **CRUD endpoints** for the tables above. Only `/api/health` and `/api/me` exist today.
+- **Cart and agent routes.** The cart has no Supabase table and neither the cart nor the agent has an HTTP route. Both need the login code below to load first.
+- **The API's login code does not load.** `auth.py` and `db.py` import `supabase` and `jwt`, which are not declared in `apps/api/pyproject.toml`, and `main.py` does not create the shared HTTP client that `db.py` expects.
+- **CRUD endpoints** for the tables above. Only `/api/health` exists today.
