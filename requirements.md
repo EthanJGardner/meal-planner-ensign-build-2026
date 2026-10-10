@@ -25,6 +25,12 @@ For busy adults and families, FeedMe provides ease and healthy living by making 
 - **Safe for everyone at the table**: To make sure everyone in a household can eat safely and enjoy their food, whatever their allergies, diet, or budget.
 - **Time back**: To give busy families their time back by turning healthy eating into a plan that's done for you.
 
+**Vision**: An AI meal-planning assistant that knows what users can eat, what they enjoy, what they need nutritionally, and what they can afford. It creates personalized plans they can easily adjust.
+
+**Core flow**: Set Preferences → Generate Meal Plan → Review Meals → Replace Meals → Save Preferences.
+
+**What sets FeedMe apart**: An AI can generate a recipe on its own. FeedMe's value is putting Budget, Nutrition, Cooking Time, and Preferences into the same plan, with a Grocery List generated from it.
+
 ### 1.3 Hackathon priority
 
 The primary objective is to complete and demonstrate the meal-planning experience. The product is not being sold as part of the hackathon. Business and monetization work is secondary to a working meal plan.
@@ -48,42 +54,58 @@ Users should be able to:
 7. Edit preferences and regenerate the plan.
 8. View the ingredients and grocery list needed for the plan.
 
-## 3. Product Scope
+## 3. MVP Scope
 
-### 3.1 MVP scope
+### 3.1 Essential
 
-The MVP should include:
+These features are required for a working demo and must ship first:
 
-- A preference and household setup form
-- Allergy and dietary-restriction capture
-- Household serving-size support
 - Personalized meal-plan generation for breakfast, lunch, and dinner
-- A best-fit meal recommendation with alternatives
-- Meal acceptance, rejection, saving, and replacement
-- Editable preferences and plan regeneration
-- Basic preference persistence
-- Recipe details and ingredient quantities
-- A grocery list
-- Checkout and payment for the grocery list via Stripe
+- Allergy and dietary-restriction support
+- Calorie and macro goal support
+- User preferences input (household size, preference and household setup form)
+- Meal viewing and selection, including a best-fit recommendation with alternatives, recipe details, and ingredient quantities
+- Grocery list generation
 - A simple, usable demo interface
 
-The MVP should prioritize one clear meal-planning flow over a large number of secondary sections.
+### 3.2 High
 
-### 3.2 Post-MVP or optional scope
+These features round out the core flow and should ship if time allows after Essential is complete:
 
-The following features may be added only if the MVP is complete:
+- Replace disliked meals
+- Edit preferences and regenerate the plan
+- Budget setting
+- Save preferences (basic preference persistence)
+- Checkout and payment for the grocery list via Stripe
 
+### 3.3 Optional
+
+- Custom recipes with ingredient swaps
+- Preferred grocery stores
 - Fridge-based meal suggestions
+- User-published meal plans
+- Browse weekly plans from other users
+- Be able to add a meal plan to your calendar
+
+### 3.4 Later
+
+- Subscriptions
+- Alexa integration
+
+### 3.5 Further future scope
+
+The following are not part of the priority tiers above and would only be considered well beyond MVP:
+
 - Separate meals for picky eaters or individual household members
 - Favorites, repurchase history, purchase history, receipts, and templates
 - Social proof and recommendation ranking based on likes or purchases
-- Store price comparisons
-- Store locations or map pins
-- Subscriptions
+- Store price comparisons and store locations or map pins
 - Cross-device persistence
-- Interfaces for mobile or Alexa
+- Mobile interfaces
 
 Separate meals for individual household members are specifically deferred because they substantially increase planning and safety complexity.
+
+The MVP should prioritize one clear meal-planning flow over a large number of secondary sections.
 
 ## 4. User Experience Requirements
 
@@ -188,7 +210,7 @@ Nutrition accuracy and allergy-safe substitutions are high-priority risks becaus
 - Frontend: React with TypeScript
 - Backend: FastAPI
 - Persistence for MVP: browser local storage
-- AI generation: Claude via API
+- AI generation: ChatGPT via API
 - Payments: Stripe
 - Demo deployment: team member laptop with secrets stored in a local .env file
 
