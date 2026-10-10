@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI
 
+from api.household.router import router as household_router
 from api.meals.router import router as meals_router
 from api.meals.services import MealServices
 from api.runs.router import router as runs_router
@@ -56,6 +57,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(runs_router)
     app.include_router(meals_router)
+    app.include_router(household_router)
     return app
 
 
