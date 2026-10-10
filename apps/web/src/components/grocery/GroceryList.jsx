@@ -1,16 +1,18 @@
 import { useGroceryList } from '../../hooks/useGroceryList'
 import { useHousehold } from '../../hooks/useHousehold'
-import { CheckoutPanel } from './CheckoutPanel'
+import { BuyPanel } from './BuyPanel'
 
 export function GroceryList() {
-  const { items, total, unpriced, mealCount, week } = useGroceryList()
+  const { items, mealCount, week } = useGroceryList()
   const { preferences } = useHousehold()
+
+  const noAmounts = items.some((item) => item.quantity === null)
 
   return (
     <>
       <p className="panel__lede">
         Built from the {mealCount} {mealCount === 1 ? 'meal' : 'meals'} you
-        confirmed in Week {week + 1}, sized for your household of{' '}
+        confirmed in Week {week + 1}, for your household of{' '}
         {preferences.householdSize}. Leftover slots buy nothing extra.
       </p>
 
@@ -19,8 +21,7 @@ export function GroceryList() {
           <thead>
             <tr>
               <th scope="col">Item</th>
-              <th scope="col">Total amount</th>
-              <th scope="col">Est. cost</th>
+              <th scope="col">Amount</th>
               <th scope="col">Used in</th>
             </tr>
           </thead>
@@ -31,36 +32,22 @@ export function GroceryList() {
                 <td>
                   {item.quantity === null ? '—' : `${item.quantity} ${item.unit}`}
                 </td>
-                <td>
-                  {item.estimatedCost === null ? '—' : `$${item.estimatedCost.toFixed(2)}`}
-                </td>
                 <td className="data-table__muted">{item.usedIn.join(', ')}</td>
               </tr>
             ))}
           </tbody>
-          {unpriced ? null : (
-            <tfoot>
-              <tr>
-                <th scope="row" colSpan="2">
-                  Estimated total
-                </th>
-                <td colSpan="2">${total.toFixed(2)}</td>
-              </tr>
-            </tfoot>
-          )}
         </table>
       </div>
 
-      {unpriced ? (
-        <p className="mt-4 text-mute">
-          Items marked &ldquo;—&rdquo; come from planner recipes, which give
-          ingredient names only, with no amounts or prices. There is no total or
-          checkout for this list, so work out how much of each you need before you
-          shop.
+      {noAmounts ? (
+        <p className="fine-print">
+          Items marked &ldquo;—&rdquo; come from planner recipes, which list
+          their ingredients without amounts. Prices come from the stores, when
+          the buying agent shops.
         </p>
-      ) : (
-        <CheckoutPanel items={items} total={total} />
-      )}
+      ) : null}
+
+      <BuyPanel />
     </>
   )
 }

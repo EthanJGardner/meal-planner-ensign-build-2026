@@ -1,18 +1,22 @@
 import { useState } from 'react'
+import { Navigate } from 'react-router'
 import { CURRENT_WEEK } from '../lib/constants'
 import { accountDefaults } from '../lib/accountSetup'
 import { isWeekEmpty } from '../lib/planner'
-import { accountPlanKey, accountPreferencesKey } from '../lib/storageKeys'
+import {
+  accountPlanKey,
+  accountPreferencesKey,
+  accountRecipesKey,
+} from '../lib/storageKeys'
 import { AccountSetupProvider } from '../contexts/AccountSetupProvider'
 import { CustomRecipeProvider } from '../contexts/CustomRecipeProvider'
 import { HouseholdProvider } from '../contexts/HouseholdProvider'
 import { MealPlanProvider } from '../contexts/MealPlanProvider'
+import { ShoppingRunProvider } from '../contexts/ShoppingRunProvider'
 import { useAuth } from '../hooks/useAuth'
 import { useMealPlan } from '../hooks/useMealPlan'
-import { GuestImportPrompt } from '../components/account/GuestImportPrompt'
 import { AppHeader } from '../components/common/AppHeader'
 import { LoadingState } from '../components/common/LoadingState'
-import { WelcomePopup } from '../components/common/WelcomePopup'
 import { SetupView } from '../components/setup/SetupView'
 import { PlanView } from '../components/plan/PlanView'
 import { GroceryView } from '../components/grocery/GroceryView'
@@ -50,30 +54,13 @@ function Shell() {
           <GroceryView onBackToPlan={() => setView('plan')} />
         ) : null}
       </main>
-
-      <WelcomePopup />
-      <GuestImportPrompt />
     </div>
   )
 }
 
-function GuestApp() {
-  return (
-    <HouseholdProvider>
-      {/* The recipe book sits above the plan because the plan's catalog is
-          layered on top of the user's own recipes. */}
-      <CustomRecipeProvider>
-        <MealPlanProvider>
-          <Shell />
-        </MealPlanProvider>
-      </CustomRecipeProvider>
-    </HouseholdProvider>
-  )
-}
-
-// A signed-in user's Setup and plan live under their own storage keys, and
-// sync with the account. Their own recipes stay in this browser's storage,
-// shared with guest mode.
+// A user's Setup, plan and own recipes live under their own storage keys.
+// Setup also syncs with the account; the plan and the recipes stay in this
+// browser.
 function AccountApp({ userId }) {
   return (
     <HouseholdProvider
@@ -81,9 +68,13 @@ function AccountApp({ userId }) {
       defaults={ACCOUNT_DEFAULTS}
     >
       <AccountSetupProvider>
-        <CustomRecipeProvider>
+        {/* The recipe book sits above the plan because the plan's catalog is
+            layered on top of the user's own recipes. */}
+        <CustomRecipeProvider storageKey={accountRecipesKey(userId)}>
           <MealPlanProvider storageKey={accountPlanKey(userId)}>
-            <Shell />
+            <ShoppingRunProvider>
+              <Shell />
+            </ShoppingRunProvider>
           </MealPlanProvider>
         </CustomRecipeProvider>
       </AccountSetupProvider>
@@ -91,11 +82,14 @@ function AccountApp({ userId }) {
   )
 }
 
+// FeedMe needs an account: every recipe and every plan comes from the server,
+// which answers signed-in users only.
 export default function Home() {
   const { user, loading } = useAuth()
 
   if (loading) return <LoadingState label="Loading FeedMe…" />
+  if (!user) return <Navigate to="/login" replace />
 
-  // Keyed so signing in, out or as someone else starts every provider afresh.
-  return user ? <AccountApp key={user.id} userId={user.id} /> : <GuestApp key="guest" />
+  // Keyed so signing in as someone else starts every provider afresh.
+  return <AccountApp key={user.id} userId={user.id} />
 }

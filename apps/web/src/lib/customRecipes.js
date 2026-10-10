@@ -302,15 +302,6 @@ export function recipeWarnings(recipe, preferences) {
     )
   }
 
-  if (
-    (recipe.ingredients ?? []).length &&
-    recipe.ingredients.every((ingredient) => !ingredient.cost)
-  ) {
-    warnings.push(
-      'Every ingredient costs $0, so this recipe will look free against your budget. Add prices to keep the budget honest.',
-    )
-  }
-
   const missing = (preferences?.dietaryRestrictions ?? []).filter(
     (restriction) => !(recipe.tags ?? []).includes(restriction),
   )

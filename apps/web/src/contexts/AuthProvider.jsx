@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router'
 import { authConfigured } from '../lib/config'
 import { AUTH_NOT_CONFIGURED, authErrorMessage } from '../lib/authErrors'
 import { setUnauthorizedHandler } from '../lib/http'
-import { GUEST_IMPORT_OFFER_KEY, writeStored } from '../lib/storageKeys'
 import { supabase } from '../lib/supabase'
 import { AuthContext } from './contexts'
 
@@ -69,9 +68,6 @@ export function AuthProvider({ children }) {
       if (data.user && Array.isArray(data.user.identities) && !data.user.identities.length) {
         return { error: authErrorMessage({ code: 'user_already_exists' }) }
       }
-
-      // Remember to offer the guest's Setup to this account once it signs in.
-      writeStored(GUEST_IMPORT_OFFER_KEY, email.trim().toLowerCase())
 
       return data.session ? {} : { needsConfirmation: true }
     } catch (error) {

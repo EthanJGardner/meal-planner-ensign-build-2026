@@ -260,8 +260,9 @@ POST again with the payment credential
 | `runs/` | The HTTP routes, turning a grocery list into the agent's shopping list, and keeping the order row up to date during a run. |
 | `recipes/` | Reads recipes from Qdrant: by id, by search, and the list of ingredient names. |
 
-- **Tools:** `list_stores`, `search_products`, `compare_prices`, `plan_basket`, `add_to_cart`, `remove_from_cart`, `view_cart`, and `checkout` when a wallet is connected.
+- **Tools:** `list_stores`, `search_list`, `search_products`, `compare_prices`, `plan_basket`, `add_to_cart`, `remove_from_cart`, `view_cart`, and `checkout` when a wallet is connected.
 - **The server sets the price and pack count.** The model only names a store, a UPC and the ingredient it is for.
+- **One search for the whole list.** `search_list` takes no arguments: it searches every store for every item on the shopping list and gives each item's three best products, plus the items no store sells. The model picks from that and goes to `plan_basket`, so a run takes about five model turns however long the list is. Before it existed, a 97-item list used all 25 turns on single searches and bought nothing (2026-10-10).
 - **Manual mode:** everything is saved as `proposed` until the user approves the basket.
 - **Auto mode:** items go straight to `in_cart`, except these, which stay `proposed` for the user's check: store-brand items, replacements for something out of stock, unsure matches, more than 10 packs of one item, items whose amount wasn't known, and anything that would pass the budget. Auto with no budget runs as manual.
 - **The mode is enforced in `cart/service.py`,** not in the prompt. The agent has one `add_to_cart` tool in both modes.
@@ -331,6 +332,7 @@ The "buy it for me" button:
 What a run shops for:
 
 - Every grocery item that isn't ticked (`checked`) and that an earlier run hasn't already paid for. If nothing is left, the answer is `409`.
+- Plain water and ice are left out ("water", "boiling water", "ice cubes"): the stores' search matches on single words, so "water" would buy canned tuna in water.
 - The amount is `quantity_estimate` and `unit`. An item with no usable amount is bought as one pack and held for the user's check (`unknown_quantity`). So is a name that is on the list in two different units.
 - The budget is the plan's own `budget`. The user's weekly budget in `preferences` is not used here.
 - Each run starts from an empty cart, so a second run never adds to what the first one left.
@@ -395,7 +397,7 @@ The sandbox test needs `STRIPE_SECRET_KEY` and `STRIPE_PROFILE_ID` in `.env`. It
 
 ### The whole path by hand, with Link
 
-`scripts/try_shopping_run.py` does what the web app will: it signs up a throwaway user, gives it a plan and a grocery list, starts a run on the running API and prints it live, then shows the saved order and deletes the user. With payments on you approve once in the Link app.
+`scripts/try_shopping_run.py` does what the web app's Grocery step does: it signs up a throwaway user, gives it a plan and a grocery list, starts a run on the running API and prints it live, then shows the saved order and deletes the user. With payments on you approve once in the Link app.
 
 ```powershell
 docker compose up -d --wait
@@ -548,11 +550,10 @@ Any other style (`keto`, `mediterranean`) is passed to the query model as a pref
 - **No reranker yet.** `meals/rerank.py` has the interface and a stand-in that keeps the search order. Return the real one from `get_reranker` in `meals/router.py`. Until then side dishes and slow recipes can rank high.
 - **Jev's limit was set on a small sample:** 14 hidden-allergen recipes and 56 real ones. Check more before trusting it beyond a demo.
 - **`low-carb` filters on a field Qdrant has no index for.** It works (half a second on 10,800 recipes) and will slow down as more are loaded. `uv run scripts/ingest_recipes.py --limit 1` adds the index and embeds nothing. Without `--limit` the script embeds every recipe not loaded yet.
-- The web app still calls `POST /api/meal-plan`, which doesn't exist. It needs sign-in before it can call these routes.
 
 ## Not built yet
 
-- **Web UI for the buying agent and the meal planner.** The routes above have no screen yet: planning meals, the "buy it for me" button and its dialog, the live progress, the cart and the orders. Sign-in in the web app is not built either.
+- **An order history screen.** The web app shows the last run for the current plan (`GET /api/orders/{id}`); `GET /api/orders` has no screen yet.
 - **More alternatives and replacing a meal** (`/more`, `/replace`). The queued options are saved for them, but no route hands them out yet.
 - **Paying for a saved cart without a new run.** The agent pays at the end of its own run. Items a store couldn't sell stay in the cart until the next run, which starts over for whatever is still unbought.
 - **CRUD endpoints** for the other tables (profiles, plans, favorites, feedback, grocery lists). Besides the routes above, only `/api/health` exists.

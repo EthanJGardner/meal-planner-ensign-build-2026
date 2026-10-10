@@ -8,11 +8,10 @@ const round = (value) => Math.round(value * 100) / 100
 const SOURCE_NOTES = {
   [CUSTOM_RECIPE_SOURCE]:
     'Your own recipe. The nutrition, allergens and prices are the values you entered and have not been verified.',
-  sample:
-    'Sample recipe. Nutrition, allergens and prices are estimates and are not verified.',
-  planner:
-    'Generated recipe. Nutrition, allergens and prices are estimates and are not verified.',
 }
+
+const UNVERIFIED_NOTE =
+  'Nutrition, allergens and prices on this recipe have not been verified.'
 
 const NAMES_ONLY_NOTE =
   'Chosen by the FeedMe planner and checked against your allergies and diet. Nutrition is per serving as the recipe gives it, an estimate that is not verified. The recipe has no amounts or prices.'
@@ -114,8 +113,9 @@ function NamesOnlyRecipe({ recipe, conflicts }) {
   )
 }
 
-// Requirement 6: name, per-serving nutrition, cooking time, estimated cost,
-// flagged allergens, ingredients and directions, with the estimate caveat.
+// Requirement 6, for a recipe the user wrote: name, per-serving nutrition,
+// cooking time, the prices they entered, flagged allergens, ingredients and
+// directions, with the unverified caveat.
 export function RecipeDetail({ recipe, servings, conflicts = [] }) {
   if (isNamesOnly(recipe)) {
     return <NamesOnlyRecipe recipe={recipe} conflicts={conflicts} />
@@ -214,7 +214,7 @@ export function RecipeDetail({ recipe, servings, conflicts = [] }) {
       </section>
 
       <p className="fine-print">
-        {SOURCE_NOTES[recipe.source] ?? SOURCE_NOTES.planner} Check the product
+        {SOURCE_NOTES[recipe.source] ?? UNVERIFIED_NOTE} Check the product
         labels yourself before cooking.
       </p>
     </div>

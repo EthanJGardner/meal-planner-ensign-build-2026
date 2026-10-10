@@ -1,7 +1,7 @@
 import { useContext } from 'react'
 import { AccountSetupContext } from '../contexts/contexts'
 
-// Null for guests, so callers can branch on it: `if (account) …`.
+// The signed-in user's Setup on the server: loading, saving, allergen options.
 export function useAccountSetup() {
   return useContext(AccountSetupContext)
 }

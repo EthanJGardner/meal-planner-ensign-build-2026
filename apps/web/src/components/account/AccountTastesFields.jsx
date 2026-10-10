@@ -1,8 +1,7 @@
 import { useHousehold } from '../../hooks/useHousehold'
 import { TermListField } from './TermListField'
 
-// A signed-in user's food likes and dislikes, as two lists of short terms.
-// They replace the guest's free-text field.
+// The household's food likes and dislikes, as two lists of short terms.
 export function AccountTastesFields() {
   const { preferences, setPreference } = useHousehold()
   const liked = preferences.likedFoods ?? []

@@ -12,6 +12,9 @@ export const CustomRecipeContext = createContext(null)
 // Who is signed in, and the sign-in actions.
 export const AuthContext = createContext(null)
 
-// A signed-in user's Setup on the server: loading, saving, allergen options.
-// Null for guests.
+// The buying agent's run for the confirmed week: starting it, following it
+// live, and its result.
+export const ShoppingRunContext = createContext(null)
+
+// The signed-in user's Setup on the server: loading, saving, allergen options.
 export const AccountSetupContext = createContext(null)

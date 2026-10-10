@@ -144,8 +144,8 @@ export function RecipeModal({ week, day, slotIndex, onClose, onEditRecipe }) {
         </section>
       ) : (
         <p className="fine-print">
-          No other {slotName} option fits your allergies and diet. Relax a
-          restriction in Setup to see more.
+          No other {slotName} option fits your allergies and diet. Remake the
+          plan for new ones, or relax a restriction in Setup.
         </p>
       )}
 

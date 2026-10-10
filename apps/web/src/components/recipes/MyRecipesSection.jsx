@@ -124,8 +124,9 @@ export function MyRecipesSection() {
       </h2>
       <p className="panel__lede">
         Add the meals you already cook, with your own ingredients, prices and
-        macros. We plan them alongside ours and buy for them in the same grocery
-        list.
+        macros. You can put them in any meal slot they fit, and their
+        ingredients are added to your grocery list. The buying agent shops for
+        the planner&rsquo;s recipes only.
       </p>
 
       {status ? (

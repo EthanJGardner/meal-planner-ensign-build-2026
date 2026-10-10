@@ -56,8 +56,8 @@ export function AuthForm({ mode, onSubmit, notice }) {
       </h1>
       <p className="m-0 mb-6 text-mute">
         {registering
-          ? 'Save your household setup and plans to an account, so they follow you to any browser.'
-          : 'Welcome back. Sign in to load your saved setup and plans.'}
+          ? 'FeedMe plans meals around your household’s allergies, diet and budget. Create an account to start.'
+          : 'Sign in to plan your household’s meals.'}
       </p>
 
       {notice ? (
@@ -150,11 +150,6 @@ export function AuthForm({ mode, onSubmit, notice }) {
         {registering ? 'Already have an account? ' : 'New to FeedMe? '}
         <Link to={registering ? '/login' : '/register'} className={ui.link}>
           {registering ? 'Sign in' : 'Create an account'}
-        </Link>
-      </p>
-      <p className="m-0 mt-2 text-ink">
-        <Link to="/" className={ui.link}>
-          Keep planning as a guest
         </Link>
       </p>
     </section>

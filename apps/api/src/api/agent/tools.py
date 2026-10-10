@@ -19,6 +19,11 @@ from api.shopping.service import ShoppingList, compare_prices, plan_basket
 from api.wallet.service import Wallet, pay_cart
 
 MAX_SEARCH_RESULTS = 6
+# search_list answers for the whole shopping list at once, so it gives fewer
+# products per item and searches a few items at a time.
+MAX_LIST_RESULTS = 3
+LIST_SEARCHES_AT_ONCE = 8
+LIST_SEARCH_TIMEOUT_SECONDS = 90.0
 
 
 class ToolError(Exception):
@@ -63,9 +68,17 @@ SPECS = [
         _object({}, []),
     ),
     ToolSpec(
+        "search_list",
+        "Search every store for every item on the shopping list, in one call. Gives "
+        "each item's best matching products with their lowest price, and the items no "
+        "store sells (not_sold). Call this first, once.",
+        _object({}, []),
+    ),
+    ToolSpec(
         "search_products",
         "Search every store for products matching a few words, best match first. "
-        "Each product lists the stores that sell it, with price and stock.",
+        "Each product lists the stores that sell it, with price and stock. search_list "
+        "already does this for every item on the shopping list.",
         _object({"query": _STRING}, ["query"]),
     ),
     ToolSpec(
@@ -155,6 +168,7 @@ class Toolbox:
         self.checkout_attempted = False
         self._handlers = {
             "list_stores": (_NoArgs, self._list_stores),
+            "search_list": (_NoArgs, self._search_list),
             "search_products": (_Search, self._search_products),
             "compare_prices": (_Compare, self._compare_prices),
             "plan_basket": (_Plan, self._plan_basket),
@@ -166,9 +180,12 @@ class Toolbox:
             self._handlers["checkout"] = (_NoArgs, self._checkout)
 
     def timeout(self, name: str, default: float) -> float:
-        """Paying waits on a person, so it gets the approval window plus slack."""
+        """Paying waits on a person, so it gets the approval window plus slack.
+        Searching for a whole list is many searches, so it gets longer too."""
         if name == "checkout" and self._wallet:
             return self._wallet.approval_timeout + 120
+        if name == "search_list":
+            return max(default, LIST_SEARCH_TIMEOUT_SECONDS)
         return default
 
     async def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -190,9 +207,56 @@ class Toolbox:
     async def _list_stores(self, args: _NoArgs) -> dict[str, Any]:
         return {"stores": [store.model_dump() for store in self._index.stores.values()]}
 
+    async def _search_list(self, args: _NoArgs) -> dict[str, Any]:
+        gate = asyncio.Semaphore(LIST_SEARCHES_AT_ONCE)
+
+        async def search(name: str) -> list[dict[str, Any]]:
+            async with gate:
+                return await self._search(name)
+
+        names = [item.name for item in self._list.items]
+        found = await asyncio.gather(*(search(name) for name in names))
+        items, not_sold = [], []
+        for name, products in zip(names, found, strict=True):
+            if not products:
+                not_sold.append(name)
+                continue
+            items.append(
+                {
+                    "ingredient": name,
+                    # Without each store's offer: plan_basket prices the picks.
+                    "products": [
+                        {
+                            "upc": product["upc"],
+                            "name": product["name"],
+                            "brand": product["brand"],
+                            "size": product["size"],
+                            "store_brand": product["store_brand"],
+                            "match": product["match"],
+                            "from_cents": min(o["price_cents"] for o in product["offers"]),
+                            "in_stock": any(o["in_stock"] for o in product["offers"]),
+                        }
+                        for product in products[:MAX_LIST_RESULTS]
+                    ],
+                }
+            )
+        # Without this a model searches again for each item nothing was found
+        # for, one turn at a time, and runs out of turns before it buys anything.
+        return {
+            "items": items,
+            "not_sold": not_sold,
+            "next": "Every store was searched for every item. No store sells the not_sold "
+            "items: leave them out and do not search for them. Now pick one product for "
+            "each of the other items and call plan_basket.",
+        }
+
     async def _search_products(self, args: _Search) -> dict[str, Any]:
+        return {"products": (await self._search(args.query))[:MAX_SEARCH_RESULTS]}
+
+    async def _search(self, query: str) -> list[dict[str, Any]]:
+        """Every store's products for a few words, best match first."""
         per_store = await asyncio.gather(
-            *(self._client.search(slug, args.query) for slug in self._index.stores)
+            *(self._client.search(slug, query) for slug in self._index.stores)
         )
         products: dict[str, dict[str, Any]] = {}
         for hit in (hit for hits in per_store for hit in hits):
@@ -212,7 +276,7 @@ class Toolbox:
                 {"store": hit.store, "price_cents": hit.price_cents, "in_stock": hit.in_stock}
             )
         # Best keyword match first, then national brands, then the lowest price.
-        ranked = sorted(
+        return sorted(
             products.values(),
             key=lambda p: (
                 -p["match"]["matched"],
@@ -222,7 +286,6 @@ class Toolbox:
                 p["upc"],
             ),
         )
-        return {"products": ranked[:MAX_SEARCH_RESULTS]}
 
     async def _compare_prices(self, args: _Compare) -> dict[str, Any]:
         return {"offers": [row.model_dump() for row in compare_prices(self._index, args.upc)]}

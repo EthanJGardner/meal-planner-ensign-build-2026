@@ -39,7 +39,9 @@ from api.shopping.service import ShoppingList
 from api.wallet.service import Wallet
 
 _STEPS = [
-    "Search for each item and pick the product that best matches it.",
+    "Call search_list once. It searches every store for every item on the list, so do "
+    "not search item by item. Pick the product that best matches each item. Leave out "
+    "the items it lists as not_sold, and any item whose products are a different food.",
     "Call plan_basket once with one pick per item.",
     'Add every line of the plan\'s "cheapest" option to the cart with add_to_cart.',
 ]

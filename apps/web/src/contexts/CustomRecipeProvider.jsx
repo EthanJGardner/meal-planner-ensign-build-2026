@@ -1,24 +1,22 @@
 import { useCallback, useMemo } from 'react'
-import { SAMPLE_RECIPES } from '../lib/sampleRecipes'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 import { CustomRecipeContext } from './contexts'
 
-const STORAGE_KEY = 'feedme.customRecipes.v1'
-
 // Requirement 5.7: the recipes a user writes persist across a refresh in this
 // browser, independently of any plan. They are kept out of the plan's own
-// storage so regenerating a plan never discards them.
-export function CustomRecipeProvider({ children }) {
-  const [customRecipes, setCustomRecipes] = useLocalStorage(STORAGE_KEY, [])
+// storage so regenerating a plan never discards them. Each account has its own
+// key; the parent remounts this provider when the user changes.
+export function CustomRecipeProvider({ children, storageKey }) {
+  const [customRecipes, setCustomRecipes] = useLocalStorage(storageKey, [])
 
-  // Every name the catalog already uses, minus the recipe being edited. A plan
-  // slot stores a recipe by name, so names have to stay unique.
+  // Every name the user's own recipes already use, minus the recipe being
+  // edited. A plan slot stores a recipe by name, so names have to stay unique;
+  // the form adds the names of the plan's other recipes.
   const takenNames = useCallback(
     (exceptName = null) =>
-      [
-        ...SAMPLE_RECIPES.map((recipe) => recipe.name),
-        ...customRecipes.map((recipe) => recipe.name),
-      ].filter((name) => name !== exceptName),
+      customRecipes
+        .map((recipe) => recipe.name)
+        .filter((name) => name !== exceptName),
     [customRecipes],
   )
 

@@ -5,6 +5,7 @@ import { useHousehold } from '../../hooks/useHousehold'
 import { useMealPlan } from '../../hooks/useMealPlan'
 import { usePlanSummary } from '../../hooks/usePlanSummary'
 import { Banner } from '../common/Banner'
+import { PlanBuildingState } from '../common/LoadingState'
 import { SafetyDisclaimer } from '../common/SafetyDisclaimer'
 import { RecipeFormModal } from '../recipes/RecipeFormModal'
 import { PlanSummary } from './PlanSummary'
@@ -12,41 +13,34 @@ import { PlanTable } from './PlanTable'
 import { RecipeModal } from './RecipeModal'
 import { WeekTabs } from './WeekTabs'
 
-const weekStatus = (week) => {
-  if (week < CURRENT_WEEK) {
-    return 'Week 1 is done. The meals from that week are kept here as a record.'
-  }
-  if (week === CURRENT_WEEK) {
-    return 'This is the week built from your setup. Change a dinner and the next day’s leftovers follow it.'
-  }
-  return `Week ${week + 1} is planned ahead, with leftovers carried over from the week before.`
-}
+const weekStatus = (week) =>
+  week === CURRENT_WEEK
+    ? 'The first week of the plan built from your setup. Change a dinner and the next day’s leftovers follow it.'
+    : `Week ${week + 1} of the plan, for a planning period longer than a week.`
 
 export function PlanView({ onEditSetup, onGoToGrocery }) {
   const { preferences } = useHousehold()
   const {
     plan,
     currentWeek,
+    status,
     note,
     error,
-    notice,
     canUndo,
     undoWeek,
     undo,
-    regenerateWeek,
+    generatePlan,
     clearWeek,
-    fitToBudget,
     confirmWeek,
-    publishWeek,
     dismissNote,
     dismissError,
-    fromPlanner,
   } = useMealPlan()
 
   const [openRecipe, setOpenRecipe] = useState(null)
   const [editRecipe, setEditRecipe] = useState(null)
   const summary = usePlanSummary(currentWeek)
 
+  const loading = status === 'loading'
   const empty = isWeekEmpty(plan, currentWeek)
   const confirmed = plan.confirmedWeek === currentWeek
 
@@ -62,8 +56,11 @@ export function PlanView({ onEditSetup, onGoToGrocery }) {
         <p className="summary-strip__text">
           {preferences.householdSize}{' '}
           {preferences.householdSize === 1 ? 'person' : 'people'} ·{' '}
-          {preferences.planningPeriod} days · ${preferences.budget} ·{' '}
-          {avoiding}
+          {preferences.planningPeriod} days ·{' '}
+          {Number(preferences.budget) > 0
+            ? `$${preferences.budget} to spend`
+            : 'no spending limit'}{' '}
+          · {avoiding}
           {preferences.dietaryRestrictions.length
             ? ` · ${preferences.dietaryRestrictions.join(', ')}`
             : ''}{' '}
@@ -75,41 +72,22 @@ export function PlanView({ onEditSetup, onGoToGrocery }) {
       </div>
 
       <div className="action-bar">
-        {summary.unpriced ? (
-          <p className="action-bar__cost">
-            No cost estimate: planner recipes come without prices
-          </p>
-        ) : (
-          <p
-            className={`action-bar__cost${
-              summary.overBudget ? ' is-over' : summary.cost ? ' is-ok' : ''
-            }`}
-          >
-            Estimated cost ${summary.cost.toFixed(2)}
-            {summary.allowedBudget
-              ? summary.overBudget
-                ? ` · over by $${summary.overBudgetBy.toFixed(2)}`
-                : ' · within budget'
-              : ''}
-          </p>
-        )}
-
-        {/* A planner plan has no prices to fit, and only the planner's own
-            options to choose from, so it can't be rebuilt here. */}
-        {fromPlanner ? null : (
-          <button type="button" className="button button--accent" onClick={() => fitToBudget(currentWeek)}>
-            Fit to budget
-          </button>
-        )}
-        <button type="button" className="button" onClick={() => publishWeek(currentWeek)}>
-          Share this week
+        {/* Asks the planner again, for the whole planning period. It leaves
+            out the meals it showed in the last two weeks, so these are new. */}
+        <button
+          type="button"
+          className="button button--accent"
+          onClick={generatePlan}
+          disabled={loading}
+        >
+          {loading ? 'Remaking your plan…' : 'Remake the plan'}
         </button>
-        {fromPlanner ? null : (
-          <button type="button" className="button" onClick={() => regenerateWeek(currentWeek)}>
-            Remake this week
-          </button>
-        )}
-        <button type="button" className="button" onClick={() => clearWeek(currentWeek)}>
+        <button
+          type="button"
+          className="button"
+          onClick={() => clearWeek(currentWeek)}
+          disabled={loading}
+        >
           Clear this week
         </button>
         <button
@@ -127,11 +105,7 @@ export function PlanView({ onEditSetup, onGoToGrocery }) {
         </Banner>
       ) : null}
 
-      {notice ? (
-        <Banner variant="notice" title="Sample data">
-          {notice}
-        </Banner>
-      ) : null}
+      {loading ? <PlanBuildingState /> : null}
 
       {summary.warnings.map((warning) => (
         <Banner key={warning} variant="warning" title="Heads up">
@@ -155,13 +129,13 @@ export function PlanView({ onEditSetup, onGoToGrocery }) {
       <WeekTabs />
       <p className="week-status">{weekStatus(currentWeek)}</p>
 
-      {empty && fromPlanner ? (
+      {empty ? (
         <section className="panel panel--empty">
-          <h2 className="panel__title">The planner&rsquo;s plan doesn&rsquo;t cover this week</h2>
+          <h2 className="panel__title">Nothing planned for this week</h2>
           <p className="panel__lede">
-            The planner chose meals for the days in your planning period. For
-            a longer plan, change the planning period in Setup and generate it
-            again.
+            The planner chooses meals for the {preferences.planningPeriod} days
+            of your planning period. For a longer plan, change the planning
+            period in Setup and build it again.
           </p>
           <button
             type="button"
@@ -169,21 +143,6 @@ export function PlanView({ onEditSetup, onGoToGrocery }) {
             onClick={onEditSetup}
           >
             Edit setup
-          </button>
-        </section>
-      ) : empty ? (
-        <section className="panel panel--empty">
-          <h2 className="panel__title">Nothing planned for this week yet</h2>
-          <p className="panel__lede">
-            Build it from your setup, or copy a week from someone with a
-            lifestyle like yours in Discover.
-          </p>
-          <button
-            type="button"
-            className="button button--primary button--large"
-            onClick={() => regenerateWeek(currentWeek)}
-          >
-            Generate this week
           </button>
         </section>
       ) : (
@@ -199,7 +158,7 @@ export function PlanView({ onEditSetup, onGoToGrocery }) {
               <p className="confirm-bar__lede">
                 {confirmed
                   ? 'Your grocery list is built from these meals. Change a meal and it updates.'
-                  : 'Confirm it to turn these meals into a grocery list you can check out.'}
+                  : 'Confirm it to turn these meals into a grocery list the buying agent can shop for.'}
               </p>
             </div>
             <div className="confirm-bar__actions">
@@ -238,6 +197,10 @@ export function PlanView({ onEditSetup, onGoToGrocery }) {
           <li>
             The small box beside each meal is the number of people. Leave it
             blank to use your household size.
+          </li>
+          <li>
+            &ldquo;Remake the plan&rdquo; asks the planner for new meals for
+            the whole planning period. It takes about half a minute.
           </li>
           <li>
             Change an allergy or diet in Setup and unsafe meals are swapped

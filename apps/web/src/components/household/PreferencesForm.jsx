@@ -8,12 +8,11 @@ import { useHousehold } from '../../hooks/useHousehold'
 import { AccountTastesFields } from '../account/AccountTastesFields'
 import { NutritionGoalsFields } from '../account/NutritionGoalsFields'
 
-// `account` swaps in a signed-in user's fields: liked and disliked foods as
-// lists, and nutrition goals with carbs and fat. A guest's form is unchanged.
-export function PreferencesForm({ account = false }) {
-  const { preferences, setPreference, setNutritionGoal, toggleRestriction } =
-    useHousehold()
-  const sizeProblem = useAccountSetup()?.problems.householdSize
+// Everything in Setup after the allergies: the household, its diet and
+// tastes, and its goals and limits.
+export function PreferencesForm() {
+  const { preferences, setPreference, toggleRestriction } = useHousehold()
+  const sizeProblem = useAccountSetup().problems.householdSize
 
   return (
     <div className="fieldset-grid">
@@ -29,7 +28,7 @@ export function PreferencesForm({ account = false }) {
             type="number"
             className="input"
             min="1"
-            max={account ? 20 : 12}
+            max="20"
             value={preferences.householdSize}
             onChange={(event) =>
               setPreference('householdSize', Number(event.target.value))
@@ -39,7 +38,7 @@ export function PreferencesForm({ account = false }) {
             Every meal is planned for {preferences.householdSize}{' '}
             {preferences.householdSize === 1 ? 'serving' : 'servings'}.
           </p>
-          {account && sizeProblem ? (
+          {sizeProblem ? (
             <p className="mt-1 text-sm font-semibold text-bad">{sizeProblem}</p>
           ) : null}
         </div>
@@ -81,75 +80,13 @@ export function PreferencesForm({ account = false }) {
           ))}
         </div>
 
-        {account ? (
-          <AccountTastesFields />
-        ) : (
-          <div className="field">
-            <label className="field__label" htmlFor="food-preferences">
-              Foods you love or want to avoid
-            </label>
-            <textarea
-              id="food-preferences"
-              className="input input--textarea"
-              rows="3"
-              placeholder="e.g. lots of chicken, no mushrooms, kid-friendly dinners"
-              value={preferences.foodPreferences}
-              onChange={(event) =>
-                setPreference('foodPreferences', event.target.value)
-              }
-            />
-            <p className="field__hint">
-              Start a phrase with &ldquo;no&rdquo; or &ldquo;avoid&rdquo; to rule
-              something out. Everything else nudges the plan towards it.
-            </p>
-          </div>
-        )}
+        <AccountTastesFields />
       </fieldset>
 
       <fieldset className="fieldset">
         <legend className="fieldset__legend">Goals and limits</legend>
 
-        {account ? (
-          <NutritionGoalsFields />
-        ) : (
-          <>
-            <div className="field">
-              <label className="field__label" htmlFor="calorie-goal">
-                Daily calories per person
-              </label>
-              <input
-                id="calorie-goal"
-                type="number"
-                className="input"
-                min="800"
-                max="5000"
-                step="50"
-                value={preferences.nutritionGoals.calories}
-                onChange={(event) =>
-                  setNutritionGoal('calories', Number(event.target.value))
-                }
-              />
-            </div>
-
-            <div className="field">
-              <label className="field__label" htmlFor="protein-goal">
-                Daily protein per person (g)
-              </label>
-              <input
-                id="protein-goal"
-                type="number"
-                className="input"
-                min="10"
-                max="300"
-                step="5"
-                value={preferences.nutritionGoals.protein}
-                onChange={(event) =>
-                  setNutritionGoal('protein', Number(event.target.value))
-                }
-              />
-            </div>
-          </>
-        )}
+        <NutritionGoalsFields />
 
         <div className="field">
           <label className="field__label" htmlFor="budget">
@@ -167,8 +104,8 @@ export function PreferencesForm({ account = false }) {
             }
           />
           <p className="field__hint">
-            Meals are chosen to stay inside this. We tell you when that is not
-            possible.
+            The most the buying agent may spend when it shops for this plan.
+            &ldquo;Buy it for me&rdquo; needs one.
           </p>
         </div>
 

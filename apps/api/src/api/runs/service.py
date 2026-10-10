@@ -31,20 +31,36 @@ def _key(name: str) -> str:
     return name.strip().lower()
 
 
+# Words that describe water or ice without making it something a store sells.
+_TAP_WORDS = {"water", "boiling", "cold", "hot", "warm", "lukewarm", "cool", "iced", "tap"}
+_ICE_WORDS = {"ice", "cube", "cubes"}
+
+
+def _from_the_tap(name: str) -> bool:
+    """Plain water or ice: "water", "boiling water", "ice cubes". The stores'
+    search matches on single words, so "water" would buy canned tuna in water."""
+    words = set(_key(name).replace("-", " ").split())
+    if "water" in words:
+        return words <= _TAP_WORDS | _ICE_WORDS
+    return "ice" in words and words <= _ICE_WORDS
+
+
 def shopping_items(
     items: list[GroceryItem], bought: set[str]
 ) -> tuple[list[ListItem], dict[str, str]]:
     """The grocery items still to buy, as the agent's shopping list, and the
     grocery item behind each name.
 
-    Left out: items the user ticked as already at home, and items an earlier run
-    paid for. An item with no usable amount is bought as one pack and flagged, so
+    Left out: items the user ticked as already at home, items an earlier run
+    paid for, and plain water or ice. An item with no usable amount is bought as one pack and flagged, so
     it waits for the user's check. So is a name listed with two different units,
     because those amounts can't be added up.
     """
     groups: dict[str, list[GroceryItem]] = {}
     for item in items:
         if item.checked or item.id in bought or not _key(item.name):
+            continue
+        if _from_the_tap(item.name):
             continue
         groups.setdefault(_key(item.name), []).append(item)
 

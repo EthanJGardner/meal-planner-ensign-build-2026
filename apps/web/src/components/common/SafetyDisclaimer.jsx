@@ -4,8 +4,8 @@ export function SafetyDisclaimer() {
       <h2 className="disclaimer__title">Check this before you cook</h2>
       <ul className="disclaimer__list">
         <li>
-          Nutrition and cost figures are estimates calculated from recipe macro
-          values. They are not medical or exact commercial data.
+          Nutrition figures are estimates, as the recipes give them. They are
+          not medical data.
         </li>
         <li>
           Allergy filtering is a starting point, not a guarantee. Read every

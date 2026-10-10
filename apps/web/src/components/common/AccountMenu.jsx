@@ -1,23 +1,10 @@
-import { Link } from 'react-router'
 import { useAuth } from '../../hooks/useAuth'
 
-// The header's sign-in state: "Sign in" for guests, the email and "Sign out"
-// once signed in.
+// The header's account corner: who is signed in, and "Sign out".
 export function AccountMenu() {
-  const { user, loading, signOut } = useAuth()
+  const { user, signOut } = useAuth()
 
-  if (loading) return null
-
-  if (!user) {
-    return (
-      <Link
-        to="/login"
-        className="rounded-lg border border-green-ink px-3 py-1 font-semibold text-green-ink no-underline hover:opacity-90"
-      >
-        Sign in
-      </Link>
-    )
-  }
+  if (!user) return null
 
   return (
     <div className="flex min-w-0 items-center gap-3 text-green-ink">

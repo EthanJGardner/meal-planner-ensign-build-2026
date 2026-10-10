@@ -16,11 +16,11 @@ export const WEEK_DAYS = [
   'Sunday',
 ]
 
-export const WEEKS_IN_PLAN = 5
+// The longest planning period is 14 days, so a plan is at most two weeks.
+export const WEEKS_IN_PLAN = 2
 
-// Week 0 is the completed week kept for reference; week 1 is the week the user
-// is planning now. Earlier weeks are never regenerated.
-export const CURRENT_WEEK = 1
+// The week a new plan starts in.
+export const CURRENT_WEEK = 0
 
 // Requirement 5.3: the same meal must not reappear within this many days.
 export const COOL_OFF_DAYS = 2
@@ -64,7 +64,7 @@ export const PLANNING_PERIOD_OPTIONS = [
 ]
 
 // Marks a recipe the user typed in themselves, as opposed to one from the
-// sample catalog ('sample') or the planner service ('planner').
+// planner service ('planner').
 export const CUSTOM_RECIPE_SOURCE = 'custom'
 
 // Requirement 5.8: a user-submitted recipe carries its own macro values, so we

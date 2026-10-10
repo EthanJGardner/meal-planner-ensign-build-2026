@@ -4,7 +4,7 @@
 export const MIN_PASSWORD_LENGTH = 6
 
 export const AUTH_NOT_CONFIGURED =
-  'Sign-in is not configured in this copy of FeedMe, so accounts are switched off. You can still plan as a guest.'
+  'Sign-in is not configured in this copy of FeedMe. Run scripts/gen-env.py at the repo root, then restart the web app.'
 
 const MESSAGES = {
   invalid_credentials: 'That email and password don’t match an account. Check them and try again.',

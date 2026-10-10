@@ -4,9 +4,7 @@ import { useMealPlan } from '../../hooks/useMealPlan'
 
 const weekNote = (week, plan) => {
   if (isWeekEmpty(plan, week)) return 'not planned'
-  if (week < CURRENT_WEEK) return 'done'
-  if (week === CURRENT_WEEK) return 'this week'
-  return 'upcoming'
+  return week === CURRENT_WEEK ? 'this week' : 'next week'
 }
 
 export function WeekTabs() {

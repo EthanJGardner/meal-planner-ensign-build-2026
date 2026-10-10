@@ -1,10 +1,9 @@
-// A signed-in user's Setup: how it maps to and from the backend's
-// preferences, allergies and nutrition goals, and the checks the database
-// would otherwise reject it with. Guests never touch this module; their Setup
-// is the DEFAULT_PREFERENCES shape kept in local storage, exactly as before.
+// The user's Setup: how it maps to and from the backend's preferences,
+// allergies and nutrition goals, and the checks the database would otherwise
+// reject it with.
 //
-// An account's Setup is that same shape plus a few fields, so every screen
-// and safety check that reads `preferences` keeps working unchanged:
+// Setup is the DEFAULT_PREFERENCES shape plus the fields below. The screens
+// and safety checks read the derived `allergies` and `foodPreferences`:
 //
 //   allergenIds        common allergens, by backend id ('milk', 'tree_nut')
 //   customAllergies    other allergens, as cleaned short terms
@@ -26,7 +25,7 @@ import {
 const DAYS_PER_WEEK = 7
 
 export const SAVE_UNAVAILABLE_MESSAGE =
-  'Saving to your account is not available right now. Your setup is kept in this browser, and you can keep planning.'
+  'Saving to your account is not available right now. Your setup is kept in this browser; try saving again in a moment.'
 
 // --- short terms ---------------------------------------------------------------
 
@@ -74,19 +73,6 @@ const LOCAL_LABEL_FOR_ALLERGEN = {
   fish: 'Fish',
   shellfish: 'Shellfish',
   sesame: 'Sesame',
-}
-
-// A guest's allergy labels, the other way round.
-const ALLERGENS_FOR_LOCAL_LABEL = {
-  Milk: ['milk'],
-  Eggs: ['egg'],
-  Peanuts: ['peanut'],
-  'Tree nuts': ['tree_nut'],
-  'Wheat/Gluten': ['wheat', 'gluten'],
-  Soy: ['soy'],
-  Fish: ['fish'],
-  Shellfish: ['shellfish'],
-  Sesame: ['sesame'],
 }
 
 // Only used when GET /api/allergens can't be reached, so the form stays
@@ -138,16 +124,13 @@ export function pendingAllergies(preferences, saved) {
 
 // --- food preferences ----------------------------------------------------------
 
-// The planner and the plan checks still read the old free-text field
-// (mealFilters.js), where "no x" means avoid. Rebuilding it from the lists
-// keeps them working without a second code path.
+// The plan checks read one text field (mealFilters.js), where "no x" means
+// avoid. It is rebuilt from the two lists.
 export const foodPreferencesText = (liked = [], disliked = []) =>
   [...liked, ...disliked.map((term) => `no ${term}`)].join(', ')
 
-// Fills the derived fields of an account's Setup. A guest's Setup has no
-// `allergenIds`, and is returned untouched.
+// Fills the derived fields of a Setup.
 export function withDerivedFields(preferences) {
-  if (!Array.isArray(preferences.allergenIds)) return preferences
   return {
     ...preferences,
     allergies: allergyLabels(preferences.allergenIds, preferences.customAllergies),
@@ -337,83 +320,3 @@ export const fromServerGoals = (row) => ({
   carbs: row.carbs_g,
   fat: row.fat_g,
 })
-
-// --- a guest's Setup, carried into a new account ---------------------------------------
-
-const sameList = (a = [], b = []) =>
-  a.length === b.length && [...a].sort().every((item, index) => item === [...b].sort()[index])
-
-// True when a guest never changed anything that Setup saves.
-export function isDefaultGuestSetup(preferences) {
-  const defaults = DEFAULT_PREFERENCES
-  return (
-    Number(preferences.householdSize) === defaults.householdSize &&
-    sameList(preferences.allergies, defaults.allergies) &&
-    sameList(preferences.dietaryRestrictions, defaults.dietaryRestrictions) &&
-    String(preferences.foodPreferences ?? '').trim() === defaults.foodPreferences &&
-    Number(preferences.nutritionGoals?.calories) === defaults.nutritionGoals.calories &&
-    Number(preferences.nutritionGoals?.protein) === defaults.nutritionGoals.protein &&
-    Number(preferences.budget) === defaults.budget &&
-    Number(preferences.cookingTime) === defaults.cookingTime &&
-    Number(preferences.planningPeriod) === defaults.planningPeriod
-  )
-}
-
-const NEGATION = /^(?:no|not|avoid|without|hate|hates|dislike|dislikes|don'?t like|skip)\s+/
-const EMPHASIS = /^(?:lots of|lot of|more|extra|love|loves|i love|prefer|prefers)\s+/
-
-// Splits the guest's free-text field into the two lists, the same way
-// mealFilters.js reads it. Phrases that aren't valid terms are returned apart
-// so they can be named instead of quietly lost.
-export function splitFoodPreferences(text = '') {
-  const liked = []
-  const disliked = []
-  const skipped = []
-
-  for (const raw of String(text).split(/[,\n;]+/)) {
-    const phrase = normalizeTerm(raw)
-    if (!phrase) continue
-    const negated = NEGATION.test(phrase)
-    const term = phrase.replace(NEGATION, '').replace(EMPHASIS, '').trim()
-    if (termProblem(term)) skipped.push(raw.trim())
-    else (negated ? disliked : liked).push(term)
-  }
-
-  return { liked: unique(liked), disliked: unique(disliked), skipped }
-}
-
-// A guest's Setup in the account's shape. Their allergies are split into
-// common ids and custom terms; a custom one the database won't take as a term
-// is returned in `skipped` so the prompt can name it.
-export function guestToAccount(guest) {
-  const allergenIds = []
-  const customAllergies = []
-  const skipped = []
-
-  for (const allergy of guest.allergies ?? []) {
-    const ids = ALLERGENS_FOR_LOCAL_LABEL[allergy]
-    if (ids) allergenIds.push(...ids)
-    else if (termProblem(allergy)) skipped.push(allergy)
-    else customAllergies.push(normalizeTerm(allergy))
-  }
-
-  const food = splitFoodPreferences(guest.foodPreferences)
-  const calories = Number(guest.nutritionGoals?.calories) || DEFAULT_PREFERENCES.nutritionGoals.calories
-  const protein = Number(guest.nutritionGoals?.protein) || 0
-
-  const setup = withDerivedFields({
-    ...accountDefaults(),
-    householdSize: Number(guest.householdSize) || 1,
-    planningPeriod: Number(guest.planningPeriod) || DEFAULT_PREFERENCES.planningPeriod,
-    budget: Number(guest.budget) || 0,
-    cookingTime: Number(guest.cookingTime) || 0,
-    dietaryRestrictions: [...(guest.dietaryRestrictions ?? [])],
-    allergenIds: unique(allergenIds),
-    customAllergies: unique(customAllergies),
-    likedFoods: food.liked,
-    dislikedFoods: food.disliked,
-    nutritionGoals: { calories, protein, ...splitMacros(calories, protein) },
-  })
-
-  return { setup, skippedAllergies: skipped, skippedFoods: food.skipped }
-}

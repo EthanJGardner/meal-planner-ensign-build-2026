@@ -1,4 +1,4 @@
-// Diet, taste and cooking-time filters. Allergies are handled separately in
+// Diet and taste checks. Allergies are handled separately in
 // allergySafety.js because they are never relaxed to widen the recipe pool.
 
 import { allergenConflicts } from './allergySafety.js'
@@ -8,11 +8,6 @@ export function matchesDiet(recipe, dietaryRestrictions = []) {
   return dietaryRestrictions.every((restriction) =>
     (recipe.tags ?? []).includes(restriction),
   )
-}
-
-function matchesCookingTime(recipe, cookingTime) {
-  const limit = Number(cookingTime) || 0
-  return !limit || recipe.cookTimeMinutes <= limit
 }
 
 export function fillsSlot(recipe, slot) {
@@ -63,12 +58,6 @@ function avoidedFoods(recipe, foodPreferences) {
   return avoid.filter((term) => term.length > 1 && haystack.includes(term))
 }
 
-export function preferredFoodMatches(recipe, foodPreferences) {
-  const { prefer } = parseFoodPreferences(foodPreferences)
-  const haystack = recipeText(recipe)
-  return prefer.filter((term) => term.length > 1 && haystack.includes(term))
-}
-
 // Every reason this recipe does not belong in the user's plan. An empty list
 // means the recipe is safe and compliant.
 export function recipeProblems(recipe, preferences) {
@@ -103,16 +92,7 @@ export function recipeProblems(recipe, preferences) {
   return problems
 }
 
-// Safe and compliant, ignoring the cooking-time limit.
+// Safe and compliant. The cooking-time limit is the planner's to apply.
 export function isRecipeCompliant(recipe, preferences) {
   return recipeProblems(recipe, preferences).length === 0
-}
-
-// Compliant and inside the cooking-time limit, which is what the generator
-// draws from.
-export function isRecipeSelectable(recipe, preferences) {
-  return (
-    isRecipeCompliant(recipe, preferences) &&
-    matchesCookingTime(recipe, preferences.cookingTime)
-  )
 }

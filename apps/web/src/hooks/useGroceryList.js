@@ -6,15 +6,16 @@ import { useMealPlan } from './useMealPlan'
 
 const round = (value) => Math.round(value * 100) / 100
 
-// Requirement 5.5: ingredients aggregated across the confirmed week, scaled to
-// the servings each meal is actually cooked for. Leftover slots buy nothing.
+// Requirement 5.5: ingredients aggregated across the confirmed week. Leftover
+// slots buy nothing. There are no prices here: real ones come from the stores,
+// in the buying agent's cart.
 export function useGroceryList() {
   const { plan } = useMealPlan()
   const { preferences } = useHousehold()
 
   return useMemo(() => {
     const week = plan?.confirmedWeek
-    const empty = { items: [], total: 0, mealCount: 0, week: null }
+    const empty = { items: [], mealCount: 0, week: null }
 
     if (!plan || week === null || week === undefined) return empty
 
@@ -36,38 +37,22 @@ export function useGroceryList() {
           const key = `${ingredient.name.toLowerCase()}|${ingredient.unit}`
           const existing = merged.get(key)
 
-          // Planner recipes give names only. Their items carry no amount and
-          // no price, and are never counted as free.
-          if (ingredient.quantity == null) {
-            if (existing) existing.usedIn.add(recipe.name)
-            else {
-              merged.set(key, {
-                key,
-                name: ingredient.name,
-                unit: '',
-                quantity: null,
-                estimatedCost: null,
-                usedIn: new Set([recipe.name]),
-              })
-            }
-            continue
-          }
+          // Planner recipes give names only, so their items carry no amount.
+          // A user's own recipe gives one, scaled to the people eating.
+          const amount =
+            ingredient.quantity == null ? null : ingredient.quantity * servings
 
           if (existing) {
-            existing.quantity = round(
-              existing.quantity + ingredient.quantity * servings,
-            )
-            existing.estimatedCost = round(
-              existing.estimatedCost + (ingredient.cost ?? 0) * servings,
-            )
             existing.usedIn.add(recipe.name)
+            if (amount !== null && existing.quantity !== null) {
+              existing.quantity = round(existing.quantity + amount)
+            }
           } else {
             merged.set(key, {
               key,
               name: ingredient.name,
-              unit: ingredient.unit,
-              quantity: round(ingredient.quantity * servings),
-              estimatedCost: round((ingredient.cost ?? 0) * servings),
+              unit: amount === null ? '' : ingredient.unit,
+              quantity: amount === null ? null : round(amount),
               usedIn: new Set([recipe.name]),
             })
           }
@@ -79,13 +64,6 @@ export function useGroceryList() {
       .map((item) => ({ ...item, usedIn: [...item.usedIn] }))
       .sort((a, b) => a.name.localeCompare(b.name))
 
-    return {
-      items,
-      total: round(items.reduce((sum, item) => sum + (item.estimatedCost ?? 0), 0)),
-      // True when some items have no price, so `total` is not the list's cost.
-      unpriced: items.some((item) => item.estimatedCost === null),
-      mealCount,
-      week,
-    }
+    return { items, mealCount, week }
   }, [plan, preferences])
 }

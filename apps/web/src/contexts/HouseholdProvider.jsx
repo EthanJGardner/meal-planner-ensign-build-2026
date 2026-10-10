@@ -1,23 +1,17 @@
 import { useCallback, useMemo } from 'react'
 import { withDerivedFields } from '../lib/accountSetup'
-import { DEFAULT_PREFERENCES } from '../lib/constants'
-import { GUEST_PREFERENCES_KEY } from '../lib/storageKeys'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 import { HouseholdContext } from './contexts'
 
-// A guest uses the defaults and key below. A signed-in user's Setup is kept
-// under its own key with the account's defaults (accountSetup.js); the parent
-// remounts this provider when the user changes, because the key is read once.
-export function HouseholdProvider({
-  children,
-  storageKey = GUEST_PREFERENCES_KEY,
-  defaults = DEFAULT_PREFERENCES,
-}) {
+// The signed-in user's Setup, kept under their own key with the account's
+// defaults (accountSetup.js). The parent remounts this provider when the user
+// changes, because the key is read once.
+export function HouseholdProvider({ children, storageKey, defaults }) {
   const [stored, setStored] = useLocalStorage(storageKey, defaults)
 
   // Merge against the defaults so a stored payload from an older build still
-  // has every field the form expects. An account's derived fields (its
-  // allergy labels and food text) are rebuilt here; a guest's are untouched.
+  // has every field the form expects. The derived fields (the allergy labels
+  // and the food text) are rebuilt here.
   const preferences = useMemo(
     () =>
       withDerivedFields({
@@ -59,11 +53,6 @@ export function HouseholdProvider({
     [setStored],
   )
 
-  const toggleAllergy = useCallback(
-    (allergy) => toggleListValue('allergies', allergy),
-    [toggleListValue],
-  )
-
   const toggleRestriction = useCallback(
     (restriction) => toggleListValue('dietaryRestrictions', restriction),
     [toggleListValue],
@@ -74,8 +63,8 @@ export function HouseholdProvider({
     [defaults, setStored],
   )
 
-  // Replaces several fields at once. Used by a signed-in user's Setup, which
-  // loads whole groups of fields from the server.
+  // Replaces several fields at once: Setup loads whole groups of fields from
+  // the server.
   const updatePreferences = useCallback(
     (patch) =>
       setStored((current) => ({
@@ -90,7 +79,6 @@ export function HouseholdProvider({
       preferences,
       setPreference,
       setNutritionGoal,
-      toggleAllergy,
       toggleRestriction,
       resetPreferences,
       updatePreferences,
@@ -99,7 +87,6 @@ export function HouseholdProvider({
       preferences,
       setPreference,
       setNutritionGoal,
-      toggleAllergy,
       toggleRestriction,
       resetPreferences,
       updatePreferences,

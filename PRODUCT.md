@@ -18,9 +18,10 @@ web
   may have shared preferences, diets, allergies, nutrition goals, a budget and
   little time to cook. They want the week's meals decided for them, safely,
   without the stress of planning (requirements 1.2, 2.1).
-- **Guests** use the app without an account, and everything stays in the
-  browser. **Account holders** sign in with email and password, so their setup
-  and plans are saved to the account.
+- **Everyone signs in** with email and password. Every recipe and every plan
+  comes from the server, which answers signed-in users only, so there is no
+  guest mode. Setup is saved to the account; the plan and the user's own
+  recipes stay in that user's browser storage.
 - The person using it is usually the one who cooks and shops for the household,
   sitting down once a week to plan, then coming back during the week to check a
   recipe or the grocery list. *(inferred)*
@@ -52,13 +53,12 @@ checked again in the browser before it is shown.
   Meals → Save Preferences (requirements 1.2).
 - The app has three steps: **Setup** (allergies first, then the rest of the
   household), **Plan** (the week grid, with alternatives for each meal and a
-  summary of nutrition and cost) and **Grocery** (the list from the confirmed
-  week).
-- For account holders, the live planner takes 25 to 35 seconds to answer. The
-  wait has to say what is happening. Guests get a built-in sample planner that
-  answers at once.
-- If the planner is unavailable, the app offers a sample plan, and labels it
-  as sample.
+  summary of nutrition) and **Grocery** (the list from the confirmed week, and
+  the buying agent that shops for it).
+- The planner takes 25 to 35 seconds to answer. The wait has to say what is
+  happening.
+- If the planner is unavailable, the app says so and asks the user to try
+  again. There is no sample plan and no made-up data anywhere.
 - It is used in a current desktop browser for the hackathon demo. Mobile is
   later scope, but the layout must still work at phone width. *(inferred)*
 
@@ -80,10 +80,17 @@ checked again in the browser before it is shown.
 - Users can submit their own recipes, with their own amounts, prices and
   macros. These are shown as entered and marked as not verified. They stay in
   browser storage for now.
-- Out of scope for this foundation: social sign-in, password reset, the buying
-  agent's screens (cart, orders, run progress, "buy it for me").
-- Undecided: whether guests should also get the server's allergen list, how
-  multi-week plans map onto the live planner, and account deletion in the UI.
+- Prices are real or absent. Planner recipes have none, so the plan shows no
+  cost estimate; the first prices the user sees are the stores' own, in the
+  buying agent's cart. The Setup budget is the agent's spending limit.
+- The buying agent shops for the planner's recipes only. It buys one pack of
+  each ingredient, and pays with one Stripe sandbox payment approved in the
+  Link app.
+- Out of scope for now: social sign-in, password reset, an order history
+  screen, paying for a saved cart without a new run, and browsing or
+  publishing other people's plans.
+- Undecided: saving plans and own recipes to the account, and account deletion
+  in the UI.
 
 ## Brand Commitments
 
@@ -102,8 +109,6 @@ checked again in the browser before it is shown.
 - `mood-board.png`: brand and logo mood board, value proposition, mission
   statements.
 - `requirements.md`: the full product requirements and the MVP tiers.
-- `apps/web/src/lib/sampleRecipes.js`: the sample recipes used for guests and
-  the fallback plan.
 - There are no testimonials, user numbers, press or pricing. Don't make any up.
 
 ## Product Principles
@@ -114,8 +119,8 @@ checked again in the browser before it is shown.
    numbers as theirs, and a missing figure stays missing.
 3. **Done for you, never locked in.** The plan arrives ready, and every meal
    can still be swapped, edited or regenerated.
-4. **Guests are first-class.** The whole flow works without an account. An
-   account only adds saving.
+4. **Nothing made up.** No sample recipes, no invented people, no estimated
+   prices. What is on screen came from the planner, the stores or the user.
 5. **One clear flow over many features.** Setup, Plan, Grocery.
 
 ## Accessibility & Inclusion

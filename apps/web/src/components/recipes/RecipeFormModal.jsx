@@ -10,6 +10,7 @@ import {
   blankDraft,
   blankIngredient,
   draftFromRecipe,
+  isCustomRecipe,
   recipeWarnings,
   validateDraft,
 } from '../../lib/customRecipes'
@@ -41,7 +42,7 @@ function Field({ id, label, hint, error, children }) {
 export function RecipeFormModal({ recipe = null, onClose, onSaved }) {
   const { preferences } = useHousehold()
   const { takenNames, saveRecipe } = useCustomRecipes()
-  const { renameSlotRecipe } = useMealPlan()
+  const { plan, renameSlotRecipe } = useMealPlan()
 
   const previousName = recipe?.name ?? null
   const [draft, setDraft] = useState(() =>
@@ -86,9 +87,16 @@ export function RecipeFormModal({ recipe = null, onClose, onSaved }) {
           : [blankIngredient()],
     }))
 
+  // The user's other recipes and the plan's own: a slot points at a recipe by
+  // name, so a clash would make it point at the wrong one.
   const names = useMemo(
-    () => takenNames(previousName),
-    [takenNames, previousName],
+    () => [
+      ...takenNames(previousName),
+      ...plan.recipes
+        .filter((item) => !isCustomRecipe(item))
+        .map((item) => item.name),
+    ],
+    [takenNames, previousName, plan.recipes],
   )
   const { errors, recipe: validated } = useMemo(
     () => validateDraft(draft, { takenNames: names }),

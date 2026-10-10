@@ -9,8 +9,8 @@ export const apiUrl = (env.VITE_API_URL ?? '').replace(/\/+$/, '')
 
 export const supabaseUrl = env.VITE_SUPABASE_URL || 'http://localhost:54321'
 
-// Public by design, but there is no default: without it sign-in is switched
-// off and the app runs for guests only.
+// Public by design. In development it is read from the repo root .env
+// (vite.config.ts); without it the sign-in pages say sign-in is not configured.
 export const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || ''
 
 export const authConfigured = Boolean(supabaseAnonKey)
@@ -26,7 +26,19 @@ export const endpoints = {
   allergens: '/api/allergens',
   allergies: '/api/allergies',
   nutritionGoals: '/api/nutrition-goals',
-  // The Stripe checkout session the grocery step asks for. No backend route
-  // answers it yet; the call is kept exactly as it was.
-  checkoutSession: '/api/checkout/session',
+  // The buying agent. The first saves the chosen recipes as a plan with its
+  // grocery list and starts a run on it; the second starts another run on a
+  // list that already exists, for what is still unbought.
+  shoppingRuns: '/api/shopping-runs',
+  listShoppingRuns: (listId) =>
+    `/api/grocery-lists/${encodeURIComponent(listId)}/shopping-runs`,
+  cart: (listId) => `/api/grocery-lists/${encodeURIComponent(listId)}/cart`,
+  approveCart: (listId) =>
+    `/api/grocery-lists/${encodeURIComponent(listId)}/cart/approve`,
+  cartItem: (listId, store, upc) =>
+    `/api/grocery-lists/${encodeURIComponent(listId)}/cart/items/${encodeURIComponent(
+      store,
+    )}/${encodeURIComponent(upc)}`,
+  autoBuy: '/api/auto-buy',
+  order: (orderId) => `/api/orders/${encodeURIComponent(orderId)}`,
 }

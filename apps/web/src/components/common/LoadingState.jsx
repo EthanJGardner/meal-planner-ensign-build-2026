@@ -6,3 +6,10 @@ export function LoadingState({ label = 'Working…' }) {
     </div>
   )
 }
+
+// What is on screen while the planner works, in Setup and in the Plan view.
+export function PlanBuildingState() {
+  return (
+    <LoadingState label="Saving your setup, then choosing meals and checking each one against your allergies and diet. This takes about half a minute." />
+  )
+}
