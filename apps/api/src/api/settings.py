@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -15,6 +16,27 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str
     supabase_anon_key: str
     supabase_service_role_key: str
+
+    # Mock stores (apps/storefront).
+    storefront_url: str = "http://localhost:8100"
+
+    # Shopping agent. "scripted" runs offline with no model.
+    llm_provider: Literal["scripted", "bedrock"] = "scripted"
+    # Required for the bedrock provider. There is no default model.
+    bedrock_model_id: str | None = None
+    aws_region: str | None = None
+    # A Bedrock API key. Optional: without it, the usual AWS credentials are used.
+    aws_bearer_token_bedrock: str | None = None
+    agent_max_steps: int = 25
+    agent_tool_timeout_seconds: float = 10.0
+
+    # Paying the stores through Stripe's Link CLI (its MCP server). Test mode is
+    # forced in code. Needs Node, and `npx @stripe/link-cli auth login` done once.
+    payments_enabled: bool = True
+    # The version is pinned on purpose: this program can move money.
+    link_mcp_command: str = "npx -y @stripe/link-cli@0.27.0 --mcp"
+    # How long to wait for the user to approve a payment in the Link app.
+    link_approval_timeout_seconds: float = 600.0
 
 
 @lru_cache
