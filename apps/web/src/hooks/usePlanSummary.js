@@ -1,74 +1,107 @@
 import { useMemo } from 'react'
-import { MEAL_STATUS } from '../lib/constants'
+import { MEAL_SLOTS, WEEK_DAYS } from '../lib/constants'
+import {
+  allowedWeekBudget,
+  dayIssues,
+  dayNutrition,
+  findRecipe,
+  plannedDayCount,
+  weekCost,
+} from '../lib/planner'
 import { useHousehold } from './useHousehold'
 import { useMealPlan } from './useMealPlan'
 
-const round = (n) => Math.round(n * 100) / 100
+const round = (value) => Math.round(value * 100) / 100
 
-export function usePlanSummary() {
+// Requirement 5.3: aggregated nutrition and cost for the week on screen,
+// measured against the user's goals and budget.
+export function usePlanSummary(week) {
   const { plan } = useMealPlan()
   const { preferences } = useHousehold()
 
   return useMemo(() => {
-    const meals = plan?.meals ?? []
-    const accepted = meals.filter(
-      (meal) => meal.status === MEAL_STATUS.ACCEPTED,
-    )
+    const calorieGoal = Number(preferences.nutritionGoals?.calories) || 0
+    const proteinGoal = Number(preferences.nutritionGoals?.protein) || 0
+    const servings = Math.max(1, Number(preferences.householdSize) || 1)
 
-    const budget = Number(preferences.budget) || 0
-    const totalCost = round(
-      accepted.reduce((sum, meal) => sum + (meal.estimatedCost ?? 0), 0),
-    )
-
-    const withNutrition = accepted.filter((meal) => meal.nutritionPerServing)
-    const daysWithMeals = new Set(accepted.map((meal) => meal.day)).size || 1
-
-    const macroTotals = withNutrition.reduce(
-      (totals, meal) => ({
-        calories: totals.calories + (meal.nutritionPerServing.calories ?? 0),
-        protein: totals.protein + (meal.nutritionPerServing.protein ?? 0),
-        carbs: totals.carbs + (meal.nutritionPerServing.carbs ?? 0),
-        fat: totals.fat + (meal.nutritionPerServing.fat ?? 0),
-      }),
-      { calories: 0, protein: 0, carbs: 0, fat: 0 },
-    )
-
-    // Macros are stored per serving, so dividing by the number of planned days
-    // gives one person's daily intake.
-    const perPersonPerDay = {
-      calories: Math.round(macroTotals.calories / daysWithMeals),
-      protein: Math.round(macroTotals.protein / daysWithMeals),
-      carbs: Math.round(macroTotals.carbs / daysWithMeals),
-      fat: Math.round(macroTotals.fat / daysWithMeals),
+    if (!plan) {
+      return {
+        plannedDays: 0,
+        filledSlots: 0,
+        totalSlots: 0,
+        cost: 0,
+        allowedBudget: 0,
+        overBudget: false,
+        overBudgetBy: 0,
+        calories: 0,
+        protein: 0,
+        carbs: 0,
+        fat: 0,
+        calorieGoal,
+        proteinGoal,
+        servings,
+        problemDays: [],
+        savedCount: 0,
+        warnings: [],
+        source: null,
+      }
     }
+
+    const days = plan.weeks[week]
+    const plannedDays = plannedDayCount(plan, week)
+
+    let calories = 0
+    let protein = 0
+    let carbs = 0
+    let fat = 0
+    let filledSlots = 0
+    let savedCount = 0
+    const problemDays = []
+
+    days.forEach((day, dayIndex) => {
+      const nutrition = dayNutrition(plan, week, dayIndex)
+      calories += nutrition.calories
+      protein += nutrition.protein
+      filledSlots += nutrition.filled
+
+      for (const slot of day) {
+        if (slot.saved) savedCount += 1
+        const recipe = findRecipe(plan, slot.recipe)
+        if (!recipe?.nutritionPerServing) continue
+        carbs += recipe.nutritionPerServing.carbs ?? 0
+        fat += recipe.nutritionPerServing.fat ?? 0
+      }
+
+      if (dayIssues(plan, week, dayIndex, preferences).length) {
+        problemDays.push(WEEK_DAYS[dayIndex])
+      }
+    })
+
+    // Macros are stored per serving, so dividing by the planned days gives one
+    // person's daily intake.
+    const divisor = Math.max(plannedDays, 1)
+    const cost = weekCost(plan, week, preferences)
+    const allowed = allowedWeekBudget(plan, week, preferences)
 
     return {
-      totalMeals: meals.length,
-      acceptedCount: accepted.length,
-      pendingCount: meals.filter(
-        (meal) => meal.status === MEAL_STATUS.PENDING,
-      ).length,
-      rejectedCount: meals.filter(
-        (meal) => meal.status === MEAL_STATUS.REJECTED,
-      ).length,
-      savedCount: meals.filter((meal) => meal.saved).length,
-      servings: plan?.servings ?? (Number(preferences.householdSize) || 1),
-      daysWithMeals: accepted.length ? daysWithMeals : 0,
-      planningPeriod: plan?.planningPeriod ?? preferences.planningPeriod,
-      totalCost,
-      budget,
-      budgetRemaining: round(budget - totalCost),
-      overBudget: budget > 0 && totalCost > budget,
-      perPersonPerDay,
-      hasNutrition: withNutrition.length > 0,
-      nutritionCoverage: {
-        counted: withNutrition.length,
-        total: accepted.length,
-      },
-      calorieGoal: Number(preferences.nutritionGoals.calories) || 0,
-      proteinGoal: Number(preferences.nutritionGoals.protein) || 0,
-      warnings: plan?.warnings ?? [],
-      source: plan?.source ?? null,
+      plannedDays,
+      filledSlots,
+      totalSlots: days.length * MEAL_SLOTS.length,
+      cost,
+      allowedBudget: allowed,
+      overBudget: allowed > 0 && cost > allowed,
+      overBudgetBy: allowed > 0 ? round(Math.max(0, cost - allowed)) : 0,
+      calories: Math.round(calories / divisor),
+      protein: Math.round(protein / divisor),
+      carbs: Math.round(carbs / divisor),
+      fat: Math.round(fat / divisor),
+      calorieGoal,
+      proteinGoal,
+      servings,
+      problemDays,
+      savedCount,
+      warnings: plan.warnings ?? [],
+      source: plan.source ?? null,
     }
-  }, [plan, preferences])
+  }, [plan, preferences, week])
 }

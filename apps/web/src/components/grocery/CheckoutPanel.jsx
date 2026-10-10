@@ -1,6 +1,8 @@
 import { useCheckout } from '../../hooks/useCheckout'
 import { Banner } from '../common/Banner'
 
+// Requirement 5.5: payment goes through Stripe's hosted checkout, so card
+// details never reach this app or our backend.
 export function CheckoutPanel({ items, total }) {
   const { startCheckout, status, error } = useCheckout()
 
@@ -16,7 +18,7 @@ export function CheckoutPanel({ items, total }) {
         </div>
         <button
           type="button"
-          className="button button--primary"
+          className="button button--primary button--large"
           onClick={() => startCheckout({ items, total })}
           disabled={status === 'loading' || !items.length}
         >
@@ -30,9 +32,9 @@ export function CheckoutPanel({ items, total }) {
         </Banner>
       ) : null}
 
-      <p className="checkout__fineprint">
-        Payment is handled on Stripe's hosted checkout page. Card details never
-        reach this app or our backend.
+      <p className="fine-print">
+        Payment is handled on Stripe&rsquo;s hosted checkout page. Card details
+        never reach this app or our backend.
       </p>
     </div>
   )

@@ -1,45 +1,58 @@
-const money = (value) =>
-  value == null ? '—' : `$${Number(value).toFixed(2)}`
+const money = (value) => (value == null ? '—' : `$${Number(value).toFixed(2)}`)
+const round = (value) => Math.round(value * 100) / 100
 
-export function RecipeDetail({ meal }) {
-  const nutrition = meal.nutritionPerServing
+// Requirement 6: name, per-serving nutrition, cooking time, estimated cost,
+// flagged allergens, ingredients and directions, with the estimate caveat.
+export function RecipeDetail({ recipe, servings, conflicts = [] }) {
+  const nutrition = recipe.nutritionPerServing
+  const perServingCost = recipe.ingredients.reduce(
+    (sum, ingredient) => sum + (ingredient.cost ?? 0),
+    0,
+  )
 
   return (
     <div className="recipe">
-      <div className="recipe__section">
-        <h4 className="recipe__heading">Nutrition per serving (estimated)</h4>
-        {nutrition ? (
-          <ul className="macro-list">
-            <li>
-              <span>{nutrition.calories}</span> cal
-            </li>
-            <li>
-              <span>{nutrition.protein}g</span> protein
-            </li>
-            <li>
-              <span>{nutrition.carbs}g</span> carbs
-            </li>
-            <li>
-              <span>{nutrition.fat}g</span> fat
-            </li>
-          </ul>
-        ) : (
-          <p className="recipe__empty">
-            No nutrition estimate is available for this meal.
-          </p>
-        )}
-        <p className="recipe__source">
-          Source: {meal.nutritionSource}. Estimates only — verify anything
-          safety-critical.
-        </p>
-      </div>
+      <p className="recipe__meta">
+        Per serving · about {nutrition.calories} kcal · {nutrition.protein} g
+        protein · {recipe.cookTimeMinutes} min · about{' '}
+        {money(perServingCost)} (estimates)
+      </p>
 
-      <div className="recipe__section">
-        <h4 className="recipe__heading">
-          Ingredients for {meal.servings}{' '}
-          {meal.servings === 1 ? 'serving' : 'servings'}
-        </h4>
-        <table className="ingredient-table">
+      {recipe.allergens.length ? (
+        <p className={conflicts.length ? 'recipe__allergens is-conflict' : 'recipe__allergens'}>
+          Contains: {recipe.allergens.join(', ')}
+          {conflicts.length
+            ? ` — this conflicts with ${conflicts.join(', ')} in your setup.`
+            : ''}
+        </p>
+      ) : null}
+
+      <section className="recipe__section">
+        <h3 className="recipe__heading">Nutrition per serving (estimated)</h3>
+        <ul className="macro-list">
+          <li>
+            <span>{nutrition.calories}</span> kcal
+          </li>
+          <li>
+            <span>{nutrition.protein}g</span> protein
+          </li>
+          <li>
+            <span>{nutrition.carbs}g</span> carbs
+          </li>
+          <li>
+            <span>{nutrition.fat}g</span> fat
+          </li>
+        </ul>
+        <p className="recipe__source">
+          Source: {recipe.nutritionSource ?? 'Estimated from recipe macros'}.
+        </p>
+      </section>
+
+      <section className="recipe__section">
+        <h3 className="recipe__heading">
+          Ingredients for {servings} {servings === 1 ? 'serving' : 'servings'}
+        </h3>
+        <table className="data-table">
           <thead>
             <tr>
               <th scope="col">Ingredient</th>
@@ -48,13 +61,13 @@ export function RecipeDetail({ meal }) {
             </tr>
           </thead>
           <tbody>
-            {meal.ingredients.map((ingredient) => (
+            {recipe.ingredients.map((ingredient) => (
               <tr key={`${ingredient.name}-${ingredient.unit}`}>
                 <td>{ingredient.name}</td>
                 <td>
-                  {ingredient.quantity} {ingredient.unit}
+                  {round(ingredient.quantity * servings)} {ingredient.unit}
                 </td>
-                <td>{money(ingredient.estimatedCost)}</td>
+                <td>{money(round((ingredient.cost ?? 0) * servings))}</td>
               </tr>
             ))}
           </tbody>
@@ -63,22 +76,29 @@ export function RecipeDetail({ meal }) {
               <th scope="row" colSpan="2">
                 Meal total
               </th>
-              <td>{money(meal.estimatedCost)}</td>
+              <td>{money(round(perServingCost * servings))}</td>
             </tr>
           </tfoot>
         </table>
-      </div>
+      </section>
 
-      <div className="recipe__section">
-        <h4 className="recipe__heading">
-          Steps · about {meal.cookTimeMinutes} min
-        </h4>
+      <section className="recipe__section">
+        <h3 className="recipe__heading">
+          Directions · about {recipe.cookTimeMinutes} min
+        </h3>
         <ol className="recipe__steps">
-          {meal.instructions.map((step) => (
+          {recipe.instructions.map((step) => (
             <li key={step}>{step}</li>
           ))}
         </ol>
-      </div>
+      </section>
+
+      <p className="fine-print">
+        {recipe.source === 'sample'
+          ? 'Sample recipe. Nutrition, allergens and prices are estimates and are not verified.'
+          : 'Generated recipe. Nutrition, allergens and prices are estimates and are not verified.'}{' '}
+        Check the product labels yourself before cooking.
+      </p>
     </div>
   )
 }

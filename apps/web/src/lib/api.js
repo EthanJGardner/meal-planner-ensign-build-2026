@@ -1,18 +1,25 @@
-import { MEAL_STATUS, MEAL_TYPES } from './constants'
-import { findDeclaredConflicts } from './allergySafety'
+import { CURRENT_WEEK, MEAL_SLOTS, WEEKS_IN_PLAN } from './constants.js'
+import { allergenConflicts } from './allergySafety.js'
+import { SAMPLE_RECIPES } from './sampleRecipes.js'
+import { emptySlot, emptyWeeks } from './planner.js'
 
 // Contract expected from the FastAPI backend:
 //
 // POST /api/meal-plan              { preferences } -> { plan }
-// POST /api/meal-plan/alternative  { meal, preferences, excludeNames } -> { meal }
+// POST /api/meal-plan/alternative  { recipe, slot, preferences, excludeNames }
+//                                    -> { recipe }
 // POST /api/checkout/session       { items, total } -> { url }
 //
-// plan: { id, planningPeriod, servings, warnings?: string[], meals: Meal[] }
-// Meal: { id, name, mealType, day, servings, cookTimeMinutes, estimatedCost,
-//         ingredients: [{ name, quantity, unit, estimatedCost }],
-//         instructions: string[], nutritionPerServing: { calories, protein,
-//         carbs, fat }, nutritionSource?, allergens?: string[], tags?: string[],
-//         alternatives?: Meal[] }
+// plan: { id, planningPeriod, warnings?: string[], meals: Meal[] }
+// Meal: { name, mealType: 'breakfast'|'lunch'|'dinner', day: 1-based,
+//         cookTimeMinutes, allergens?: string[], tags?: string[],
+//         nutritionPerServing: { calories, protein, carbs, fat },
+//         nutritionSource?: string,
+//         ingredients: [{ name, quantity, unit, cost }],
+//         instructions: string[] }
+//
+// Quantities, costs and nutrition are all PER SERVING. The frontend scales
+// them to the household size, so the backend never has to know it.
 
 const REQUEST_TIMEOUT_MS = 60_000
 
@@ -22,8 +29,9 @@ const failure = (message, kind) => {
   return error
 }
 
-// 'unavailable' means the planner could not be reached and the sample-data path
-// is allowed. 'invalid' means it answered with something we refuse to show.
+// 'unavailable' means the planner could not be reached and the sample-data
+// path is allowed. 'invalid' means it answered with something we refuse to
+// show (requirement 7.2).
 const unavailable = (message) => failure(message, 'unavailable')
 const invalid = (message) => failure(message, 'invalid')
 
@@ -58,14 +66,14 @@ async function postJson(path, body) {
   return payload
 }
 
-function validateMeal(raw, index) {
+function validateRecipe(raw, index) {
   const where = `Meal ${index + 1}`
 
   if (!raw || typeof raw !== 'object') {
     throw invalid(`${where} was missing from the planner response.`)
   }
   if (!raw.name) throw invalid(`${where} has no name.`)
-  if (!MEAL_TYPES.includes(raw.mealType)) {
+  if (!MEAL_SLOTS.includes(raw.mealType)) {
     throw invalid(`${raw.name} has an unrecognized meal type.`)
   }
   if (!Array.isArray(raw.ingredients) || !raw.ingredients.length) {
@@ -80,96 +88,129 @@ function validateMeal(raw, index) {
   if (raw.cookTimeMinutes == null) {
     throw invalid(`${raw.name} has no estimated cooking time.`)
   }
-
-  const ingredients = raw.ingredients.map((item) => ({
-    name: item.name,
-    quantity: Number(item.quantity),
-    unit: item.unit ?? '',
-    estimatedCost: item.estimatedCost == null ? null : Number(item.estimatedCost),
-  }))
+  if (raw.nutritionPerServing?.calories == null) {
+    throw invalid(`${raw.name} has no calorie estimate.`)
+  }
 
   return {
-    id: raw.id ?? `${raw.mealType}-${index}-${raw.name}`,
-    name: raw.name,
-    mealType: raw.mealType,
-    day: Number(raw.day) || 1,
-    servings: Number(raw.servings) || 1,
-    cookTimeMinutes: Number(raw.cookTimeMinutes),
-    ingredients,
-    instructions: raw.instructions,
-    nutritionPerServing: raw.nutritionPerServing ?? null,
-    nutritionSource: raw.nutritionSource ?? 'Estimated by the meal planner',
-    estimatedCost:
-      raw.estimatedCost == null
-        ? ingredients.reduce((sum, item) => sum + (item.estimatedCost ?? 0), 0)
-        : Number(raw.estimatedCost),
-    allergens: raw.allergens ?? [],
-    tags: raw.tags ?? [],
-    alternatives: Array.isArray(raw.alternatives)
-      ? raw.alternatives.map((alt, altIndex) => validateMeal(alt, altIndex))
-      : [],
-    status: raw.status ?? MEAL_STATUS.PENDING,
-    saved: Boolean(raw.saved),
+    recipe: {
+      name: raw.name,
+      // Lunch and dinner are interchangeable in our pools, so a main the
+      // planner put at lunch can also be offered for dinner.
+      slots:
+        raw.mealType === 'breakfast' ? ['breakfast'] : ['lunch', 'dinner'],
+      cookTimeMinutes: Number(raw.cookTimeMinutes),
+      allergens: Array.isArray(raw.allergens) ? raw.allergens : [],
+      tags: Array.isArray(raw.tags) ? raw.tags : [],
+      nutritionPerServing: {
+        calories: Number(raw.nutritionPerServing.calories) || 0,
+        protein: Number(raw.nutritionPerServing.protein) || 0,
+        carbs: Number(raw.nutritionPerServing.carbs) || 0,
+        fat: Number(raw.nutritionPerServing.fat) || 0,
+      },
+      nutritionSource: raw.nutritionSource ?? 'Estimated by the meal planner',
+      ingredients: raw.ingredients.map((item) => ({
+        name: item.name,
+        quantity: Number(item.quantity),
+        unit: item.unit ?? '',
+        cost: Number(item.cost) || 0,
+      })),
+      instructions: raw.instructions,
+      source: 'planner',
+    },
+    placement: {
+      day: Math.max(1, Number(raw.day) || 1),
+      slotIndex: MEAL_SLOTS.indexOf(raw.mealType),
+    },
   }
 }
 
-function assertAllergySafe(meals, allergies) {
+// Nothing the planner returns is shown until it has been re-checked here. A
+// declared allergen the household reacts to rejects the whole response.
+function assertAllergySafe(recipes, allergies) {
   if (!allergies.length) return
 
-  for (const meal of meals) {
-    const conflicts = findDeclaredConflicts(meal, allergies)
+  for (const recipe of recipes) {
+    const conflicts = allergenConflicts(recipe, allergies)
     if (conflicts.length) {
       throw invalid(
-        `${meal.name} was returned even though it contains ${conflicts.join(', ')}. The plan was rejected for your safety.`,
+        `${recipe.name} was returned even though it contains ${conflicts.join(', ')}. The plan was rejected for your safety.`,
       )
     }
   }
 }
 
-function validatePlan(payload, preferences) {
-  const plan = payload?.plan ?? payload
-  if (!plan || !Array.isArray(plan.meals) || !plan.meals.length) {
+// The planner's recipes sit alongside the sample catalog so the Plan view's
+// dropdowns still offer a full set of swaps. A planner recipe wins on a name
+// clash because it is the one the plan was actually built from.
+function mergeCatalog(planned) {
+  const byName = new Map(SAMPLE_RECIPES.map((recipe) => [recipe.name, { ...recipe, source: 'sample' }]))
+  for (const recipe of planned) byName.set(recipe.name, recipe)
+  return [...byName.values()]
+}
+
+function buildPlan(payload, preferences) {
+  const raw = payload?.plan ?? payload
+  if (!raw || !Array.isArray(raw.meals) || !raw.meals.length) {
     throw invalid('The planner returned a plan with no meals.')
   }
 
-  const meals = plan.meals.map((meal, index) => validateMeal(meal, index))
-  assertAllergySafe(meals, preferences.allergies)
-  assertAllergySafe(
-    meals.flatMap((meal) => meal.alternatives),
-    preferences.allergies,
-  )
+  const validated = raw.meals.map((meal, index) => validateRecipe(meal, index))
+  const recipes = validated.map((item) => item.recipe)
+  assertAllergySafe(recipes, preferences.allergies ?? [])
+
+  const weeks = emptyWeeks()
+  const maxDays = (WEEKS_IN_PLAN - CURRENT_WEEK) * 7
+
+  for (const { recipe, placement } of validated) {
+    const offset = placement.day - 1
+    if (offset < 0 || offset >= maxDays) continue
+
+    const absolute = CURRENT_WEEK * 7 + offset
+    const week = Math.floor(absolute / 7)
+    const day = absolute % 7
+
+    weeks[week][day][placement.slotIndex] = {
+      ...emptySlot(),
+      recipe: recipe.name,
+    }
+  }
 
   return {
-    id: plan.id ?? `plan-${Date.now()}`,
-    createdAt: plan.createdAt ?? new Date().toISOString(),
+    id: raw.id ?? `plan-${Date.now()}`,
+    createdAt: raw.createdAt ?? new Date().toISOString(),
     source: 'planner',
-    servings: Number(plan.servings) || Number(preferences.householdSize) || 1,
-    planningPeriod:
-      Number(plan.planningPeriod) || Number(preferences.planningPeriod) || 1,
-    meals,
-    warnings: Array.isArray(plan.warnings) ? plan.warnings : [],
+    recipes: mergeCatalog(recipes),
+    weeks,
+    confirmedWeek: null,
+    warnings: Array.isArray(raw.warnings) ? raw.warnings : [],
   }
 }
 
 export async function requestMealPlan(preferences) {
   const payload = await postJson('/api/meal-plan', { preferences })
-  return validatePlan(payload, preferences)
+  return buildPlan(payload, preferences)
 }
 
-export async function requestMealAlternative({
-  meal,
+export async function requestRecipeAlternative({
+  recipe,
+  slot,
   preferences,
   excludeNames = [],
 }) {
   const payload = await postJson('/api/meal-plan/alternative', {
-    meal,
+    recipe,
+    slot,
     preferences,
     excludeNames,
   })
 
-  const raw = payload?.meal ?? payload
-  const alternative = validateMeal(raw, 0)
-  assertAllergySafe([alternative], preferences.allergies)
+  const raw = payload?.recipe ?? payload?.meal ?? payload
+  const { recipe: alternative } = validateRecipe(
+    { ...raw, mealType: raw?.mealType ?? slot },
+    0,
+  )
+  assertAllergySafe([alternative], preferences.allergies ?? [])
   return alternative
 }
 
@@ -177,7 +218,9 @@ export async function createCheckoutSession({ items, total }) {
   const payload = await postJson('/api/checkout/session', { items, total })
 
   if (!payload?.url) {
-    throw invalid('Checkout could not be started: no Stripe session was returned.')
+    throw invalid(
+      'Checkout could not be started: no Stripe session was returned.',
+    )
   }
 
   return payload.url

@@ -1,7 +1,7 @@
 export function SafetyDisclaimer() {
   return (
     <aside className="disclaimer" aria-label="Safety information">
-      <h3 className="disclaimer__title">Check this before you cook</h3>
+      <h2 className="disclaimer__title">Check this before you cook</h2>
       <ul className="disclaimer__list">
         <li>
           Nutrition and cost figures are estimates calculated from recipe macro

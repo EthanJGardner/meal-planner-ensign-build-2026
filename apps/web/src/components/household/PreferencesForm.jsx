@@ -10,9 +10,9 @@ export function PreferencesForm() {
     useHousehold()
 
   return (
-    <div className="preferences">
-      <fieldset className="field-group">
-        <legend className="field-group__legend">Household</legend>
+    <div className="fieldset-grid">
+      <fieldset className="fieldset">
+        <legend className="fieldset__legend">Household</legend>
 
         <div className="field">
           <label className="field__label" htmlFor="household-size">
@@ -56,10 +56,10 @@ export function PreferencesForm() {
         </div>
       </fieldset>
 
-      <fieldset className="field-group">
-        <legend className="field-group__legend">Diet and tastes</legend>
+      <fieldset className="fieldset">
+        <legend className="fieldset__legend">Diet and tastes</legend>
 
-        <div className="checkbox-grid">
+        <div className="checkbox-grid checkbox-grid--single">
           {DIETARY_RESTRICTIONS.map((restriction) => (
             <label key={restriction} className="checkbox">
               <input
@@ -86,11 +86,15 @@ export function PreferencesForm() {
               setPreference('foodPreferences', event.target.value)
             }
           />
+          <p className="field__hint">
+            Start a phrase with &ldquo;no&rdquo; or &ldquo;avoid&rdquo; to rule
+            something out. Everything else nudges the plan towards it.
+          </p>
         </div>
       </fieldset>
 
-      <fieldset className="field-group">
-        <legend className="field-group__legend">Goals and limits</legend>
+      <fieldset className="fieldset">
+        <legend className="fieldset__legend">Goals and limits</legend>
 
         <div className="field">
           <label className="field__label" htmlFor="calorie-goal">
@@ -118,7 +122,7 @@ export function PreferencesForm() {
             id="protein-goal"
             type="number"
             className="input"
-            min="20"
+            min="10"
             max="300"
             step="5"
             value={preferences.nutritionGoals.protein}
@@ -144,8 +148,8 @@ export function PreferencesForm() {
             }
           />
           <p className="field__hint">
-            Meals are chosen to stay inside this budget. We tell you when that
-            is not possible.
+            Meals are chosen to stay inside this. We tell you when that is not
+            possible.
           </p>
         </div>
 

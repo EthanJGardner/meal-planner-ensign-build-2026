@@ -1,59 +1,53 @@
 import { useGroceryList } from '../../hooks/useGroceryList'
+import { useHousehold } from '../../hooks/useHousehold'
 import { CheckoutPanel } from './CheckoutPanel'
 
 export function GroceryList() {
-  const { items, total, mealCount, servings } = useGroceryList()
+  const { items, total, mealCount, week } = useGroceryList()
+  const { preferences } = useHousehold()
 
   return (
-    <section className="panel" id="grocery" aria-labelledby="grocery-title">
-      <header className="panel__header">
-        <div>
-          <h2 className="panel__title" id="grocery-title">
-            Grocery list
-          </h2>
-          <p className="panel__subtitle">
-            Built from your {mealCount} accepted{' '}
-            {mealCount === 1 ? 'meal' : 'meals'}, sized for {servings}{' '}
-            {servings === 1 ? 'serving' : 'servings'} each.
-          </p>
-        </div>
-      </header>
+    <>
+      <p className="panel__lede">
+        Built from the {mealCount} {mealCount === 1 ? 'meal' : 'meals'} you
+        confirmed in Week {week + 1}, sized for your household of{' '}
+        {preferences.householdSize}. Leftover slots buy nothing extra.
+      </p>
 
-      {items.length ? (
-        <>
-          <table className="ingredient-table ingredient-table--grocery">
-            <thead>
-              <tr>
-                <th scope="col">Item</th>
-                <th scope="col">Total amount</th>
-                <th scope="col">Est. cost</th>
-                <th scope="col">Used in</th>
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th scope="col">Item</th>
+              <th scope="col">Total amount</th>
+              <th scope="col">Est. cost</th>
+              <th scope="col">Used in</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item) => (
+              <tr key={item.key}>
+                <th scope="row">{item.name}</th>
+                <td>
+                  {item.quantity} {item.unit}
+                </td>
+                <td>${item.estimatedCost.toFixed(2)}</td>
+                <td className="data-table__muted">{item.usedIn.join(', ')}</td>
               </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <tr key={item.key}>
-                  <td>{item.name}</td>
-                  <td>
-                    {item.quantity} {item.unit}
-                  </td>
-                  <td>${item.estimatedCost.toFixed(2)}</td>
-                  <td className="ingredient-table__used-in">
-                    {[...new Set(item.usedIn)].join(', ')}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <th scope="row" colSpan="2">
+                Estimated total
+              </th>
+              <td colSpan="2">${total.toFixed(2)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
 
-          <CheckoutPanel items={items} total={total} />
-        </>
-      ) : (
-        <p className="panel__empty">
-          Accept a meal and its ingredients show up here, combined across the
-          whole plan.
-        </p>
-      )}
-    </section>
+      <CheckoutPanel items={items} total={total} />
+    </>
   )
 }
