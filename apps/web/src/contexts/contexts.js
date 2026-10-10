@@ -1,0 +1,6 @@
+import { createContext } from 'react'
+
+// Kept apart from the providers so those files export components only, which
+// is what Vite's fast refresh needs.
+export const HouseholdContext = createContext(null)
+export const MealPlanContext = createContext(null)
