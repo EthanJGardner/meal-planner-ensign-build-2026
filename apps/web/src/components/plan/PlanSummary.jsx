@@ -19,10 +19,10 @@ const describeGoal = (actual, goal, unit) => {
     : `${Math.abs(delta)}${unit} under your goal`
 }
 
-// Requirement 5.3: aggregated nutrition and cost for the week against the
+// Requirement 5.3: aggregated nutrition and cost for the whole plan against the
 // user's goals and budget.
-export function PlanSummary({ week }) {
-  const summary = usePlanSummary(week)
+export function PlanSummary() {
+  const summary = usePlanSummary()
 
   return (
     <dl className="stat-grid">
@@ -30,10 +30,10 @@ export function PlanSummary({ week }) {
         label="Estimated cost"
         value={`$${summary.cost.toFixed(2)}`}
         detail={
-          summary.allowedBudget
+          summary.budget
             ? summary.overBudget
-              ? `$${summary.overBudgetBy.toFixed(2)} over the $${summary.allowedBudget.toFixed(2)} share for these days`
-              : `Inside the $${summary.allowedBudget.toFixed(2)} share for these days`
+              ? `$${summary.overBudgetBy.toFixed(2)} over your $${summary.budget.toFixed(2)} budget`
+              : `Inside your $${summary.budget.toFixed(2)} budget`
             : 'No budget set'
         }
         variant={summary.overBudget ? 'alert' : undefined}
@@ -55,7 +55,7 @@ export function PlanSummary({ week }) {
       />
       <Stat
         label="Days planned"
-        value={`${summary.plannedDays} / 7`}
+        value={summary.plannedDays}
         detail={`${summary.filledSlots} of ${summary.totalSlots} meal slots filled`}
       />
       <Stat

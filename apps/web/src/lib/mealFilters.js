@@ -1,7 +1,8 @@
-// Diet, taste and cooking-time filters. Allergies are handled separately in
-// allergySafety.js because they are never relaxed to widen the recipe pool.
+// Diet, taste and prep-time filters. The avoid list is handled separately in
+// avoid.js because it is never relaxed to widen the recipe pool.
 
-import { allergenConflicts } from './allergySafety.js'
+import { avoidConflicts } from './avoid.js'
+import { singular } from './text.js'
 
 // Each selected restriction must be named in the recipe's tags.
 export function matchesDiet(recipe, dietaryRestrictions = []) {
@@ -10,7 +11,7 @@ export function matchesDiet(recipe, dietaryRestrictions = []) {
   )
 }
 
-function matchesCookingTime(recipe, cookingTime) {
+function matchesPrepTime(recipe, cookingTime) {
   const limit = Number(cookingTime) || 0
   return !limit || recipe.cookTimeMinutes <= limit
 }
@@ -50,8 +51,6 @@ function parseFoodPreferences(foodPreferences = '') {
   return { avoid: avoid.filter(Boolean), prefer: prefer.filter(Boolean) }
 }
 
-const singular = (word) => word.trim().replace(/s$/, '')
-
 const recipeText = (recipe) =>
   `${recipe.name} ${(recipe.ingredients ?? [])
     .map((ingredient) => ingredient.name)
@@ -74,11 +73,20 @@ export function preferredFoodMatches(recipe, foodPreferences) {
 export function recipeProblems(recipe, preferences) {
   const problems = []
 
-  const allergens = allergenConflicts(recipe, preferences.allergies ?? [])
-  if (allergens.length) {
+  // Requirement 5.1: one strict list, so one problem covering all of it. The
+  // conflict names the ingredient it found where it can, because that reads
+  // better than naming the rule ("Contains Cheddar cheese", not "Contains
+  // Milk") and because it is the ingredient a swap would have to replace.
+  const conflicts = avoidConflicts(recipe, preferences.avoid ?? [])
+  if (conflicts.length) {
     problems.push({
-      kind: 'allergy',
-      message: `Contains ${allergens.join(', ')}`,
+      kind: 'avoid',
+      // A declared allergen is the case where the recipe itself says so, which
+      // is worth saying more loudly than a scan result.
+      declared: conflicts.some((conflict) => conflict.declared),
+      message: `Contains ${conflicts
+        .map((conflict) => conflict.ingredients[0] ?? conflict.entry)
+        .join(', ')}`,
     })
   }
 
@@ -96,23 +104,23 @@ export function recipeProblems(recipe, preferences) {
   if (avoided.length) {
     problems.push({
       kind: 'avoided',
-      message: `Has ${avoided.join(', ')}, which you avoid`,
+      message: `Has ${avoided.join(', ')}, which you ruled out`,
     })
   }
 
   return problems
 }
 
-// Safe and compliant, ignoring the cooking-time limit.
+// Safe and compliant, ignoring the prep-time limit.
 export function isRecipeCompliant(recipe, preferences) {
   return recipeProblems(recipe, preferences).length === 0
 }
 
-// Compliant and inside the cooking-time limit, which is what the generator
-// draws from.
+// Compliant and inside the prep-time limit, which is what the generator draws
+// from.
 export function isRecipeSelectable(recipe, preferences) {
   return (
     isRecipeCompliant(recipe, preferences) &&
-    matchesCookingTime(recipe, preferences.cookingTime)
+    matchesPrepTime(recipe, preferences.cookingTime)
   )
 }

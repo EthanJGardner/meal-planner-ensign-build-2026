@@ -1,8 +1,9 @@
-import { CURRENT_WEEK, MEAL_SLOTS, WEEKS_IN_PLAN } from './constants.js'
-import { allergenConflicts } from './allergySafety.js'
+import { MEAL_SLOTS } from './constants.js'
+import { avoidConflictLabels } from './avoid.js'
 import { mergeCustomRecipes } from './customRecipes.js'
 import { SAMPLE_RECIPES } from './sampleRecipes.js'
-import { emptySlot, emptyWeeks } from './planner.js'
+import { sanitizePlanDates } from './dates.js'
+import { emptyDay, emptySlot } from './planner.js'
 
 // Contract expected from the FastAPI backend:
 //
@@ -21,6 +22,14 @@ import { emptySlot, emptyWeeks } from './planner.js'
 //
 // Quantities, costs and nutrition are all PER SERVING. The frontend scales
 // them to the household size, so the backend never has to know it.
+//
+// A meal's `day` is 1-based over the days the user ASKED FOR, not over the
+// calendar: day 1 is the first date in `preferences.planDates`, day 2 the
+// second, and so on. The user picks those dates on a calendar, they need not be
+// consecutive, and there is no limit on how far ahead they go, so the frontend
+// maps each day number back onto the date it belongs to.
+// `preferences.planDates` is sent with every request as YYYY-MM-DD strings, so
+// the planner can read the real dates instead of a count.
 //
 // `customRecipes` are recipes the user wrote themselves, in the same per-serving
 // Meal shape minus `day` and `mealType` (they carry `slots` instead, naming the
@@ -94,7 +103,7 @@ function validateRecipe(raw, index) {
     throw invalid(`${raw.name} has no preparation instructions.`)
   }
   if (raw.cookTimeMinutes == null) {
-    throw invalid(`${raw.name} has no estimated cooking time.`)
+    throw invalid(`${raw.name} has no estimated prep time.`)
   }
   if (raw.nutritionPerServing?.calories == null) {
     throw invalid(`${raw.name} has no calorie estimate.`)
@@ -133,16 +142,16 @@ function validateRecipe(raw, index) {
   }
 }
 
-// Nothing the planner returns is shown until it has been re-checked here. A
-// declared allergen the household reacts to rejects the whole response.
-function assertAllergySafe(recipes, allergies) {
-  if (!allergies.length) return
+// Nothing the planner returns is shown until it has been re-checked here.
+// Anything on the household's avoid list rejects the whole response.
+function assertAvoidSafe(recipes, avoid) {
+  if (!avoid.length) return
 
   for (const recipe of recipes) {
-    const conflicts = allergenConflicts(recipe, allergies)
+    const conflicts = avoidConflictLabels(recipe, avoid)
     if (conflicts.length) {
       throw invalid(
-        `${recipe.name} was returned even though it contains ${conflicts.join(', ')}. The plan was rejected for your safety.`,
+        `${recipe.name} was returned even though it contains ${conflicts.join(', ')}, which you cannot have. The plan was rejected for your safety.`,
       )
     }
   }
@@ -167,23 +176,24 @@ function buildPlan(payload, preferences, customRecipes) {
 
   const validated = raw.meals.map((meal, index) => validateRecipe(meal, index))
   const recipes = validated.map((item) => item.recipe)
-  assertAllergySafe(recipes, preferences.allergies ?? [])
+  assertAvoidSafe(recipes, preferences.avoid ?? [])
 
-  const weeks = emptyWeeks()
-  const maxDays = (WEEKS_IN_PLAN - CURRENT_WEEK) * 7
+  const dates = sanitizePlanDates(preferences.planDates ?? [])
+
+  if (!dates.length) {
+    throw invalid(
+      'No days are picked for the plan. Choose the days you want on the calendar and try again.',
+    )
+  }
+
+  const days = {}
+  for (const date of dates) days[date] = emptyDay()
 
   for (const { recipe, placement } of validated) {
-    const offset = placement.day - 1
-    if (offset < 0 || offset >= maxDays) continue
+    const date = dates[placement.day - 1]
+    if (date === undefined) continue
 
-    const absolute = CURRENT_WEEK * 7 + offset
-    const week = Math.floor(absolute / 7)
-    const day = absolute % 7
-
-    weeks[week][day][placement.slotIndex] = {
-      ...emptySlot(),
-      recipe: recipe.name,
-    }
+    days[date][placement.slotIndex] = { ...emptySlot(), recipe: recipe.name }
   }
 
   return {
@@ -191,8 +201,8 @@ function buildPlan(payload, preferences, customRecipes) {
     createdAt: raw.createdAt ?? new Date().toISOString(),
     source: 'planner',
     recipes: mergeCatalog(recipes, customRecipes),
-    weeks,
-    confirmedWeek: null,
+    days,
+    confirmedDates: null,
     warnings: Array.isArray(raw.warnings) ? raw.warnings : [],
   }
 }
@@ -220,7 +230,7 @@ export async function requestRecipeAlternative({
     { ...raw, mealType: raw?.mealType ?? slot },
     0,
   )
-  assertAllergySafe([alternative], preferences.allergies ?? [])
+  assertAvoidSafe([alternative], preferences.avoid ?? [])
   return alternative
 }
 

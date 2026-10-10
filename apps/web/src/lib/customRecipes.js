@@ -18,7 +18,7 @@ import {
   DEFAULT_CUSTOM_NUTRITION_SOURCE,
   MEAL_SLOTS,
 } from './constants.js'
-import { allergenConflicts, detectedAllergens } from './allergySafety.js'
+import { avoidConflictLabels, detectedAllergens } from './avoid.js'
 
 const MAX_NAME_LENGTH = 80
 const MAX_SERVINGS = 50
@@ -175,7 +175,7 @@ export function validateDraft(draft, { takenNames = [] } = {}) {
     cookTimeMinutes < 0 ||
     cookTimeMinutes > MAX_COOK_MINUTES
   ) {
-    errors.cookTimeMinutes = `Enter a cooking time in minutes, up to ${MAX_COOK_MINUTES}.`
+    errors.cookTimeMinutes = `Enter a prep time in minutes, up to ${MAX_COOK_MINUTES}.`
   }
 
   const calories = toNumber(draft.calories)
@@ -295,10 +295,10 @@ export function recipeWarnings(recipe, preferences) {
     }
   }
 
-  const conflicts = allergenConflicts(recipe, preferences?.allergies ?? [])
+  const conflicts = avoidConflictLabels(recipe, preferences?.avoid ?? [])
   if (conflicts.length) {
     warnings.push(
-      `This contains ${conflicts.join(', ')}, which your household avoids, so your plans will not use it.`,
+      `This contains ${conflicts.join(', ')}, which your household cannot have, so your plans will not use it.`,
     )
   }
 

@@ -7,7 +7,7 @@ export function GroceryView({ onBackToPlan }) {
   const { plan } = useMealPlan()
   const { items } = useGroceryList()
 
-  const confirmed = plan?.confirmedWeek !== null && plan?.confirmedWeek !== undefined
+  const confirmed = Boolean(plan?.confirmedDates?.length)
 
   return (
     <>
@@ -15,7 +15,7 @@ export function GroceryView({ onBackToPlan }) {
 
       <section className="panel">
         <h2 className="panel__title">
-          {confirmed ? 'Everything this plan needs' : 'Confirm a week first'}
+          {confirmed ? 'Everything this plan needs' : 'Confirm your plan first'}
         </h2>
 
         {confirmed && items.length ? (
@@ -23,9 +23,9 @@ export function GroceryView({ onBackToPlan }) {
         ) : (
           <>
             <p className="panel__lede">
-              The grocery list is built from the week you confirm, so nothing is
-              bought for a plan you are still editing. Head back to your plan,
-              get the week how you want it, then confirm it.
+              The grocery list is built from the days you confirm, so nothing
+              is bought for a plan you are still editing. Head back to your
+              plan, get the days how you want them, then confirm.
             </p>
             <button type="button" className="button button--primary button--large" onClick={onBackToPlan}>
               Back to my plan

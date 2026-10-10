@@ -15,15 +15,15 @@ const STEPS = [
   },
   {
     title: 'Copy',
-    body: "Add someone's whole week, or just one day, to your own calendar.",
+    body: "Add someone's whole week, or just one day, starting on whatever date you choose.",
   },
   {
     title: 'Adjust',
-    body: 'Copied meals are re-checked against your allergies, diet and budget, and swapped if they do not fit.',
+    body: 'Copied meals are re-checked against what you cannot have, your diet and your budget, and swapped if they do not fit.',
   },
   {
     title: 'Share',
-    body: 'Publish your own week so other households can start from it.',
+    body: 'Publish your own plan so other households can start from it.',
   },
 ]
 
@@ -34,7 +34,7 @@ const CHALLENGES = [
   },
   {
     title: 'Competition',
-    body: 'Recipes are already everywhere. What is not: a whole week you can copy in one click, with leftovers, budget and allergy checks already done.',
+    body: 'Recipes are already everywhere. What is not: a whole week you can copy in one click, with leftovers, budget and safety checks already done.',
   },
   {
     title: 'Accuracy',
@@ -86,7 +86,7 @@ export function DiscoverSection() {
         An AI can invent a recipe. What it cannot tell you is what a real
         household on your budget actually cooked last week. Both lists below are
         ranked by how closely each plan matches your household size, budget,
-        allergies, diet and time per meal.
+        what you cannot have, diet and prep time.
       </p>
 
       <ol className="steps">
@@ -103,7 +103,7 @@ export function DiscoverSection() {
         <h3 className="discover__group-title">One day at a time</h3>
         <p className="section-lede">
           For when you only need to fill tomorrow. Pick a day, read the recipes,
-          and drop it into your week.
+          and drop it onto any date you like.
         </p>
         <PlanGrid plans={SHARED_DAILY_PLANS} />
       </section>

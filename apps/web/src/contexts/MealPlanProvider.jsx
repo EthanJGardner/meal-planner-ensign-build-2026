@@ -1,39 +1,42 @@
 import { useCallback, useMemo, useState } from 'react'
-import {
-  CURRENT_WEEK,
-  MEAL_SLOTS,
-  MEAL_STATUS,
-  WEEK_DAYS,
-  WEEKS_IN_PLAN,
-} from '../lib/constants'
+import { MEAL_SLOTS, MEAL_STATUS } from '../lib/constants'
 import { requestMealPlan, requestRecipeAlternative } from '../lib/api'
 import {
   mergeCustomRecipes,
   withoutCustomRecipes,
 } from '../lib/customRecipes'
+import {
+  planRangeLabel,
+  sanitizePlanDates,
+  shiftISO,
+  shortDateISO,
+  todayISO,
+} from '../lib/dates'
 import { demoAlternative, emptyDemoPlan, generateDemoPlan } from '../lib/demoPlan'
 import {
+  cloneDays,
+  emptyDay,
   emptySlot,
-  fitWeekToBudget,
-  generateWeeks,
-  isWeekEmpty,
+  fitPlanToBudget,
+  generateDays,
+  isPlanEmpty,
+  plannedDates,
   resyncPlan,
-  resyncWeek,
+  visibleDates,
 } from '../lib/planner'
+import { adaptCatalog, restoreCatalog } from '../lib/substitutions'
 import { scoreSharedPlan } from '../lib/sharedPlans'
 import { useCustomRecipes } from '../hooks/useCustomRecipes'
 import { useHousehold } from '../hooks/useHousehold'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 import { MealPlanContext } from './contexts'
 
-const STORAGE_KEY = 'feedme.plan.v2'
-const DAYS_PER_WEEK = 7
+// v3: the plan is keyed by calendar date rather than by a position in a fixed
+// five-week grid, so a v2 payload cannot be read and is not migrated.
+const STORAGE_KEY = 'feedme.plan.v3'
 
 const SAMPLE_DATA_NOTICE =
-  'The live planner is unavailable, so this plan was built from sample recipes. Allergy and diet filters still applied, but verify every ingredient before cooking.'
-
-const cloneWeeks = (weeks) =>
-  weeks.map((week) => week.map((day) => day.map((slot) => ({ ...slot }))))
+  'The live planner is unavailable, so this plan was built from sample recipes. Your list of things you cannot have and your diet filters still applied, but verify every ingredient before cooking.'
 
 // Only these inputs can make an existing meal unsafe or non-compliant, so only
 // these trigger an automatic re-check of the plan. Editing or deleting one of
@@ -41,7 +44,7 @@ const cloneWeeks = (weeks) =>
 // change what the meal contains.
 const safetySignature = (preferences, customRecipes) =>
   JSON.stringify([
-    preferences.allergies,
+    preferences.avoid,
     preferences.dietaryRestrictions,
     preferences.foodPreferences,
     customRecipes.map((recipe) => [
@@ -86,22 +89,23 @@ function describeResync(changes) {
 }
 
 function describePlan(preferences) {
-  const avoided = preferences.allergies ?? []
+  const avoid = preferences.avoid ?? []
   const people = Math.max(1, Number(preferences.householdSize) || 1)
+  const days = preferences.planDates?.length ?? 0
 
-  return `Plan built for ${people} ${people === 1 ? 'person' : 'people'} over ${
-    preferences.planningPeriod
-  } days. Every meal avoids ${
-    avoided.length ? listOf(avoided, 5) : 'nothing in particular'
+  return `Plan built for ${people} ${people === 1 ? 'person' : 'people'} on the ${days} ${
+    days === 1 ? 'day' : 'days'
+  } you picked (${planRangeLabel(preferences.planDates ?? [])}). Every meal avoids ${
+    avoid.length ? listOf(avoid, 5) : 'nothing in particular'
   }.`
 }
 
 export function MealPlanProvider({ children }) {
-  const { preferences } = useHousehold()
+  const { preferences, addPlanDates } = useHousehold()
   const { customRecipes } = useCustomRecipes()
   // There is always a plan object so the recipe catalog is available to
   // Discover before the user has generated anything. An untouched plan is
-  // simply one with every week empty.
+  // simply one with no days in it.
   const [storedPlan, setStoredPlan] = useLocalStorage(STORAGE_KEY, emptyDemoPlan)
 
   // Requirement 5.8: the user's own recipes are layered over whatever catalog
@@ -109,12 +113,21 @@ export function MealPlanProvider({ children }) {
   // immediately offered for every slot without rebuilding anything. They are
   // stripped again on the way back to storage, so the recipe book stays the one
   // place they live and an edit or a delete is never shadowed by a stale copy.
+  //
+  // Requirement 5.4: the catalog is then adapted to this household, which is
+  // where an ingredient swap happens. An adaptation belongs to the setup that
+  // produced it, so it is derived on read and stripped on write: storage only
+  // ever holds the recipe as it came.
   const plan = useMemo(
     () => ({
       ...storedPlan,
-      recipes: mergeCustomRecipes(storedPlan.recipes, customRecipes),
+      days: storedPlan.days ?? {},
+      recipes: adaptCatalog(
+        mergeCustomRecipes(storedPlan.recipes, customRecipes),
+        preferences,
+      ),
     }),
-    [storedPlan, customRecipes],
+    [storedPlan, customRecipes, preferences],
   )
 
   const setPlan = useCallback(
@@ -122,30 +135,37 @@ export function MealPlanProvider({ children }) {
       setStoredPlan((current) => {
         const withCustom = {
           ...current,
+          days: current.days ?? {},
           recipes: mergeCustomRecipes(current.recipes, customRecipes),
         }
         const resolved = typeof next === 'function' ? next(withCustom) : next
         if (!resolved) return current
-        return { ...resolved, recipes: withoutCustomRecipes(resolved.recipes) }
+        return {
+          ...resolved,
+          recipes: withoutCustomRecipes(restoreCatalog(resolved.recipes)),
+        }
       }),
     [customRecipes, setStoredPlan],
   )
 
-  const [currentWeek, setCurrentWeek] = useState(CURRENT_WEEK)
   const [status, setStatus] = useState('idle')
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
   const [note, setNote] = useState('')
-  const [highlight, setHighlight] = useState(null)
+  const [highlight, setHighlight] = useState([])
   const [undoSnapshot, setUndoSnapshot] = useState(null)
   const [busySlot, setBusySlot] = useState(null)
   const [publishedPlans, setPublishedPlans] = useState([])
 
+  const dates = useMemo(() => visibleDates(plan, preferences), [plan, preferences])
+
   const clearTransient = useCallback(() => {
     setNote('')
-    setHighlight(null)
+    setHighlight([])
     setUndoSnapshot(null)
   }, [])
+
+  const snapshot = useCallback(() => setUndoSnapshot(cloneDays(plan.days)), [plan])
 
   // Requirement 5.3: a safety-relevant preference change re-checks the plan and
   // swaps anything that is no longer allowed. This is React's documented
@@ -163,12 +183,23 @@ export function MealPlanProvider({ children }) {
     if (result.changes.length) {
       setPlan(result.plan)
       setNote(describeResync(result.changes))
-      setHighlight(null)
+      setHighlight([])
       setUndoSnapshot(null)
     }
   }
 
   const generatePlan = useCallback(async () => {
+    // Nothing to plan for: say so here rather than letting the request fail.
+    if (!sanitizePlanDates(preferences.planDates ?? []).length) {
+      clearTransient()
+      setNotice(null)
+      setError(
+        'Pick at least one day on the calendar before we build a plan for you.',
+      )
+      setStatus('error')
+      return
+    }
+
     setStatus('loading')
     setError(null)
     setNotice(null)
@@ -177,7 +208,6 @@ export function MealPlanProvider({ children }) {
     try {
       const generated = await requestMealPlan(preferences, customRecipes)
       setPlan(generated)
-      setCurrentWeek(CURRENT_WEEK)
       setNote(describePlan(preferences))
       setStatus('ready')
       return
@@ -191,7 +221,6 @@ export function MealPlanProvider({ children }) {
 
       try {
         setPlan(generateDemoPlan(preferences, customRecipes))
-        setCurrentWeek(CURRENT_WEEK)
         setNotice(SAMPLE_DATA_NOTICE)
         setNote(describePlan(preferences))
         setStatus('ready')
@@ -202,68 +231,69 @@ export function MealPlanProvider({ children }) {
     }
   }, [clearTransient, customRecipes, preferences, setPlan])
 
-  const regenerateWeek = useCallback(
-    (week) => {
-      if (!plan) return
+  // Rebuilds the days the user picked, in place, without going back to the
+  // planner service.
+  const regeneratePlan = useCallback(
+    (only = null) => {
+      const target = only
+        ? sanitizePlanDates(only)
+        : sanitizePlanDates(preferences.planDates ?? [])
 
-      if (week < CURRENT_WEEK) {
+      if (!target.length) {
         clearTransient()
-        setNote('Week 1 is already done, so it stays exactly as it was.')
+        setNote('Pick the days you want on the calendar in Setup first.')
         return
       }
 
-      const days =
-        week === CURRENT_WEEK
-          ? Math.min(
-              DAYS_PER_WEEK,
-              Number(preferences.planningPeriod) || DAYS_PER_WEEK,
-            )
-          : DAYS_PER_WEEK
-
-      const result = generateWeeks(plan, preferences, { startWeek: week, days })
+      const result = generateDays(plan, preferences, { dates: target })
 
       if (result.error) {
+        clearTransient()
         setNote(result.error)
         return
       }
 
-      setUndoSnapshot({ week, days: cloneWeeks(plan.weeks)[week] })
-      setPlan({ ...plan, weeks: result.weeks, warnings: result.warnings })
-      setNote(`Week ${week + 1} was rebuilt from your setup.`)
-      setHighlight(null)
+      snapshot()
+      setPlan({ ...plan, days: result.days, warnings: result.warnings })
+      setNote(
+        `Rebuilt ${target.length} ${target.length === 1 ? 'day' : 'days'} (${planRangeLabel(target)}) from your setup.`,
+      )
+      setHighlight(target)
     },
-    [clearTransient, plan, preferences, setPlan],
+    [clearTransient, plan, preferences, setPlan, snapshot],
   )
 
-  const clearWeek = useCallback(
-    (week) => {
-      if (!plan) return
+  const clearPlan = useCallback(() => {
+    snapshot()
+    setPlan({ ...plan, days: {}, confirmedDates: null })
+    setHighlight([])
+    setNote('Cleared every day in the plan.')
+  }, [plan, setPlan, snapshot])
 
-      const weeks = cloneWeeks(plan.weeks)
-      setUndoSnapshot({ week, days: weeks[week] })
-      weeks[week] = weeks[week].map(() => MEAL_SLOTS.map(() => emptySlot()))
-
-      setPlan({
-        ...plan,
-        weeks,
-        confirmedWeek: plan.confirmedWeek === week ? null : plan.confirmedWeek,
-      })
-      setHighlight(null)
-      setNote(`Week ${week + 1} was cleared.`)
+  const clearDay = useCallback(
+    (date) => {
+      snapshot()
+      const days = cloneDays(plan.days)
+      days[date] = emptyDay()
+      setPlan({ ...plan, days })
+      setHighlight([])
+      setNote(`Cleared ${shortDateISO(date)}.`)
     },
-    [plan, setPlan],
+    [plan, setPlan, snapshot],
   )
 
   const setSlot = useCallback(
-    (week, day, slotIndex, { recipe, leftover }) => {
+    (date, slotIndex, { recipe, leftover }) => {
       setPlan((current) => {
         if (!current) return current
 
-        const weeks = cloneWeeks(current.weeks)
-        const target = weeks[week][day][slotIndex]
+        const days = cloneDays(current.days)
+        days[date] = days[date] ?? emptyDay()
+
+        const target = days[date][slotIndex]
         const previous = target.recipe
 
-        weeks[week][day][slotIndex] = {
+        days[date][slotIndex] = {
           ...emptySlot(),
           recipe: recipe ?? null,
           leftover: Boolean(recipe) && Boolean(leftover),
@@ -272,8 +302,9 @@ export function MealPlanProvider({ children }) {
 
         // Changing a dinner should carry tomorrow's leftovers with it rather
         // than leaving a slot pointing at a meal nobody cooked.
-        if (slotIndex === 2 && day < DAYS_PER_WEEK - 1) {
-          const next = weeks[week][day + 1][1]
+        const tomorrow = days[shiftISO(date, 1)]
+        if (slotIndex === 2 && tomorrow) {
+          const next = tomorrow[1]
           const cooked = Boolean(recipe) && !leftover
 
           if (previous && next.leftover && next.recipe === previous) {
@@ -285,7 +316,7 @@ export function MealPlanProvider({ children }) {
           }
         }
 
-        return { ...current, weeks }
+        return { ...current, days }
       })
 
       clearTransient()
@@ -303,47 +334,42 @@ export function MealPlanProvider({ children }) {
       setPlan((current) => {
         if (!current) return current
 
-        const weeks = cloneWeeks(current.weeks)
-        for (const week of weeks) {
-          for (const day of week) {
-            for (const slot of day) {
-              if (slot.recipe === from) slot.recipe = to
-            }
+        const days = cloneDays(current.days)
+        for (const slots of Object.values(days)) {
+          for (const slot of slots) {
+            if (slot.recipe === from) slot.recipe = to
           }
         }
 
-        return { ...current, weeks }
-      })
-    },
-    [setPlan],
-  )
-
-  const setSlotServings = useCallback(
-    (week, day, slotIndex, value) => {
-      setPlan((current) => {
-        if (!current) return current
-        const weeks = cloneWeeks(current.weeks)
-        weeks[week][day][slotIndex].servings = value === '' ? null : Number(value)
-        return { ...current, weeks }
+        return { ...current, days }
       })
     },
     [setPlan],
   )
 
   const updateSlot = useCallback(
-    (week, day, slotIndex, updater) =>
+    (date, slotIndex, updater) =>
       setPlan((current) => {
-        if (!current) return current
-        const weeks = cloneWeeks(current.weeks)
-        weeks[week][day][slotIndex] = updater(weeks[week][day][slotIndex])
-        return { ...current, weeks }
+        if (!current?.days?.[date]) return current
+        const days = cloneDays(current.days)
+        days[date][slotIndex] = updater(days[date][slotIndex])
+        return { ...current, days }
       }),
     [setPlan],
   )
 
+  const setSlotServings = useCallback(
+    (date, slotIndex, value) =>
+      updateSlot(date, slotIndex, (slot) => ({
+        ...slot,
+        servings: value === '' ? null : Number(value),
+      })),
+    [updateSlot],
+  )
+
   const acceptSlot = useCallback(
-    (week, day, slotIndex) =>
-      updateSlot(week, day, slotIndex, (slot) => ({
+    (date, slotIndex) =>
+      updateSlot(date, slotIndex, (slot) => ({
         ...slot,
         status: MEAL_STATUS.ACCEPTED,
       })),
@@ -351,8 +377,8 @@ export function MealPlanProvider({ children }) {
   )
 
   const rejectSlot = useCallback(
-    (week, day, slotIndex) =>
-      updateSlot(week, day, slotIndex, (slot) => ({
+    (date, slotIndex) =>
+      updateSlot(date, slotIndex, (slot) => ({
         ...slot,
         status: MEAL_STATUS.REJECTED,
       })),
@@ -360,29 +386,24 @@ export function MealPlanProvider({ children }) {
   )
 
   const toggleSavedSlot = useCallback(
-    (week, day, slotIndex) =>
-      updateSlot(week, day, slotIndex, (slot) => ({
-        ...slot,
-        saved: !slot.saved,
-      })),
+    (date, slotIndex) =>
+      updateSlot(date, slotIndex, (slot) => ({ ...slot, saved: !slot.saved })),
     [updateSlot],
   )
 
   // Requirement 5.4: replace one meal without regenerating the plan.
   const requestAlternative = useCallback(
-    async (week, day, slotIndex) => {
-      if (!plan) return
-
-      const slot = plan.weeks[week][day][slotIndex]
-      if (!slot.recipe) return
+    async (date, slotIndex) => {
+      const slot = plan.days?.[date]?.[slotIndex]
+      if (!slot?.recipe) return
 
       const slotName = MEAL_SLOTS[slotIndex]
-      const key = `${week}-${day}-${slotIndex}`
+      const key = `${date}-${slotIndex}`
       setBusySlot(key)
       setError(null)
 
-      const excludeNames = plan.weeks[week]
-        .flatMap((cells) => cells)
+      const excludeNames = Object.values(plan.days)
+        .flat()
         .filter((cell) => cell.recipe && !cell.leftover)
         .map((cell) => cell.recipe)
 
@@ -390,23 +411,23 @@ export function MealPlanProvider({ children }) {
 
       const apply = (alternative) => {
         setPlan((state) => {
-          if (!state) return state
+          if (!state?.days?.[date]) return state
           const recipes = state.recipes.some(
             (recipe) => recipe.name === alternative.name,
           )
             ? state.recipes
             : [...state.recipes, alternative]
 
-          const weeks = cloneWeeks(state.weeks)
-          weeks[week][day][slotIndex] = {
-            ...weeks[week][day][slotIndex],
+          const days = cloneDays(state.days)
+          days[date][slotIndex] = {
+            ...days[date][slotIndex],
             recipe: alternative.name,
             leftover: false,
             status: MEAL_STATUS.PENDING,
             saved: false,
           }
 
-          return { ...state, recipes, weeks }
+          return { ...state, recipes, days }
         })
         setNote(`Swapped ${slot.recipe} for ${alternative.name}.`)
       }
@@ -434,7 +455,7 @@ export function MealPlanProvider({ children }) {
             apply(fallback)
           } else {
             setError(
-              `No other ${slotName} option fits your allergies and diet. Relax a restriction to see more.`,
+              `No other ${slotName} option fits your setup. Take something off the list of things you cannot have to see more.`,
             )
           }
         }
@@ -445,65 +466,58 @@ export function MealPlanProvider({ children }) {
     [plan, preferences, setPlan],
   )
 
-  const fitToBudget = useCallback(
-    (week) => {
-      if (!plan) return
+  const fitToBudget = useCallback(() => {
+    const result = fitPlanToBudget(plan, preferences)
+    snapshot()
+    setPlan(result.plan)
+    setNote(result.message)
+    setHighlight(result.swaps.map((swap) => swap.date))
+  }, [plan, preferences, setPlan, snapshot])
 
-      const result = fitWeekToBudget(plan, week, preferences)
-
-      setUndoSnapshot({ week, days: cloneWeeks(plan.weeks)[week] })
-      setPlan(result.plan)
-      setNote(result.message)
-      setHighlight(null)
-    },
-    [plan, preferences, setPlan],
-  )
-
-  // The grocery step works from the week the user has confirmed, so confirming
+  // The grocery step works from the days the user has confirmed, so confirming
   // is what unlocks it.
-  const confirmWeek = useCallback(
-    (week) => {
-      if (!plan) return
+  const confirmPlan = useCallback(() => {
+    const confirmedDates = plannedDates(plan)
+    if (!confirmedDates.length) return
 
-      const weeks = cloneWeeks(plan.weeks)
-      weeks[week] = weeks[week].map((day) =>
-        day.map((slot) =>
-          slot.recipe && slot.status === MEAL_STATUS.PENDING
-            ? { ...slot, status: MEAL_STATUS.ACCEPTED }
-            : slot,
-        ),
+    const days = cloneDays(plan.days)
+    for (const date of confirmedDates) {
+      days[date] = days[date].map((slot) =>
+        slot.recipe && slot.status === MEAL_STATUS.PENDING
+          ? { ...slot, status: MEAL_STATUS.ACCEPTED }
+          : slot,
       )
+    }
 
-      setPlan({ ...plan, weeks, confirmedWeek: week })
-      setNote(
-        `Week ${week + 1} is confirmed. Your grocery list is ready in the Grocery step.`,
-      )
-      setHighlight(null)
-    },
-    [plan, setPlan],
-  )
+    setPlan({ ...plan, days, confirmedDates })
+    setNote(
+      `Confirmed ${confirmedDates.length} ${
+        confirmedDates.length === 1 ? 'day' : 'days'
+      } (${planRangeLabel(confirmedDates)}). Your grocery list is ready in the Grocery step.`,
+    )
+    setHighlight([])
+  }, [plan, setPlan])
 
   // Requirement 5.6: a copied plan is still checked against this household's
-  // own allergies and diet, and anything unsafe is swapped.
-  const copySharedWeek = useCallback(
-    (shared, targetWeek) => {
-      if (!plan) return
+  // own setup, and anything that does not fit is swapped. Shared plans are
+  // stored as a run of days, so copying one is a question of which date it
+  // starts on.
+  const copyShared = useCallback(
+    (shared, startDate, rows) => {
+      const targetDates = rows.map((_, offset) => shiftISO(startDate, offset))
+      const days = cloneDays(plan.days)
 
-      const weeks = cloneWeeks(plan.weeks)
-      const before = cloneWeeks(plan.weeks)[targetWeek]
-
-      shared.days.forEach((day, dayIndex) => {
-        day.forEach((cell, slotIndex) => {
-          weeks[targetWeek][dayIndex][slotIndex] = {
-            ...emptySlot(),
-            recipe: cell?.recipe ?? null,
-            leftover: Boolean(cell?.leftover),
-          }
-        })
+      rows.forEach((row, offset) => {
+        const date = targetDates[offset]
+        days[date] = MEAL_SLOTS.map((_, slotIndex) => ({
+          ...emptySlot(),
+          recipe: row[slotIndex]?.recipe ?? null,
+          leftover: Boolean(row[slotIndex]?.leftover),
+        }))
       })
 
-      const staged = { ...plan, weeks }
-      const result = resyncWeek(staged, targetWeek, preferences)
+      const staged = { ...plan, days }
+      const result = resyncPlan(staged, preferences)
       const { score } = scoreSharedPlan(shared, plan.recipes, preferences)
 
       const swapped = result.changes.length
@@ -512,149 +526,87 @@ export function MealPlanProvider({ children }) {
           } that did not fit your setup.`
         : ''
 
-      setUndoSnapshot({ week: targetWeek, days: before })
-      setPlan({ ...staged, weeks: result.weeks })
+      snapshot()
+      setPlan(result.plan === staged ? staged : result.plan)
+      addPlanDates(targetDates)
       setNote(
-        `Added "${shared.title}" from ${shared.author} (${score}% match) to Week ${
-          targetWeek + 1
-        }.${swapped}`,
+        `Added "${shared.title}" from ${shared.author} (${score}% match) to ${planRangeLabel(
+          targetDates,
+        )}.${swapped}`,
       )
-      setHighlight({ week: targetWeek, days: WEEK_DAYS.map((_, index) => index) })
-      setCurrentWeek(targetWeek)
+      setHighlight(targetDates)
     },
-    [plan, preferences, setPlan],
+    [addPlanDates, plan, preferences, setPlan, snapshot],
+  )
+
+  const copySharedWeek = useCallback(
+    (shared, startDate) => copyShared(shared, startDate, shared.days),
+    [copyShared],
   )
 
   const copySharedDay = useCallback(
-    (shared, dayIndex) => {
-      if (!plan) return
-
-      const targetWeek = CURRENT_WEEK
-      const weeks = cloneWeeks(plan.weeks)
-      const before = cloneWeeks(plan.weeks)[targetWeek]
-      const previousDinner = weeks[targetWeek][dayIndex][2].recipe
-
-      shared.day.forEach((cell, slotIndex) => {
-        weeks[targetWeek][dayIndex][slotIndex] = {
-          ...emptySlot(),
-          recipe: cell?.recipe ?? null,
-          leftover: Boolean(cell?.leftover),
-        }
-      })
-
-      // Tomorrow's leftovers should follow the dinner that replaced it.
-      if (dayIndex < DAYS_PER_WEEK - 1) {
-        const next = weeks[targetWeek][dayIndex + 1][1]
-        if (next.leftover && next.recipe === previousDinner) {
-          next.recipe = shared.day[2]?.recipe ?? null
-          next.leftover = Boolean(next.recipe)
-        }
-      }
-
-      const staged = { ...plan, weeks }
-      const result = resyncWeek(staged, targetWeek, preferences)
-      const { score } = scoreSharedPlan(shared, plan.recipes, preferences)
-
-      const swapped = result.changes.length
-        ? ` We swapped ${result.changes.length} meal${
-            result.changes.length > 1 ? 's' : ''
-          } that did not fit your setup.`
-        : ''
-
-      setUndoSnapshot({ week: targetWeek, days: before })
-      setPlan({ ...staged, weeks: result.weeks })
-      setNote(
-        `Added "${shared.title}" from ${shared.author} (${score}% match) to ${
-          WEEK_DAYS[dayIndex]
-        } of Week ${targetWeek + 1}.${swapped} The rest of your week is unchanged.`,
-      )
-      setHighlight({ week: targetWeek, days: [dayIndex] })
-      setCurrentWeek(targetWeek)
-    },
-    [plan, preferences, setPlan],
+    (shared, date) => copyShared(shared, date, [shared.day]),
+    [copyShared],
   )
 
-  const publishWeek = useCallback(
-    (week) => {
-      if (!plan || isWeekEmpty(plan, week)) {
-        setNote('Fill this week in first, then you can share it.')
-        return null
-      }
+  const publishPlan = useCallback(() => {
+    const dayDates = plannedDates(plan)
 
-      const published = {
-        id: `mine-${Date.now()}`,
-        kind: 'weekly',
-        title: `My Week ${week + 1}`,
-        author: 'You',
-        household: Math.max(1, Number(preferences.householdSize) || 1),
-        weeklyBudget:
-          Number(preferences.budget) > 0
-            ? Math.round(
-                (Number(preferences.budget) /
-                  (Number(preferences.planningPeriod) || 1)) *
-                  DAYS_PER_WEEK,
-              )
-            : 0,
-        tags: ['Shared by you'],
-        likes: 0,
-        days: plan.weeks[week].map((day) =>
-          day.map((slot) => ({ recipe: slot.recipe, leftover: slot.leftover })),
+    if (!dayDates.length) {
+      setNote('Build a plan first, then you can share it.')
+      return null
+    }
+
+    // The feed is day-of-the-week shaped, so a published plan is the first week
+    // of days from the plan.
+    const published = {
+      id: `mine-${Date.now()}`,
+      kind: 'weekly',
+      title: `My plan from ${shortDateISO(dayDates[0])}`,
+      author: 'You',
+      household: Math.max(1, Number(preferences.householdSize) || 1),
+      weeklyBudget:
+        Number(preferences.budget) > 0
+          ? Math.round(
+              (Number(preferences.budget) / Math.max(dayDates.length, 1)) * 7,
+            )
+          : 0,
+      tags: ['Shared by you'],
+      likes: 0,
+      days: dayDates
+        .slice(0, 7)
+        .map((date) =>
+          plan.days[date].map((slot) => ({
+            recipe: slot.recipe,
+            leftover: slot.leftover,
+          })),
         ),
-      }
+    }
 
-      setPublishedPlans((current) => [published, ...current])
-      setNote(
-        `Published "${published.title}". People with a lifestyle like yours can now copy it.`,
-      )
-      return published
-    },
-    [plan, preferences],
-  )
+    setPublishedPlans((current) => [published, ...current])
+    setNote(
+      `Published "${published.title}". People with a lifestyle like yours can now copy it.`,
+    )
+    return published
+  }, [plan, preferences])
 
   const undo = useCallback(() => {
     if (!undoSnapshot) return
 
-    setPlan((current) => {
-      if (!current) return current
-      const weeks = cloneWeeks(current.weeks)
-      weeks[undoSnapshot.week] = undoSnapshot.days
-      return { ...current, weeks }
-    })
-
-    setCurrentWeek(undoSnapshot.week)
-    setNote(`Week ${undoSnapshot.week + 1} is back the way it was.`)
-    setHighlight(null)
+    setPlan((current) => (current ? { ...current, days: undoSnapshot } : current))
+    setNote('The plan is back the way it was.')
+    setHighlight([])
     setUndoSnapshot(null)
   }, [setPlan, undoSnapshot])
 
   const dismissError = useCallback(() => setError(null), [])
   const dismissNote = useCallback(() => setNote(''), [])
 
-  // Visiting an untouched future week fills it, so the tab is never a dead end.
-  const goToWeek = useCallback(
-    (week) => {
-      setCurrentWeek(week)
-      setNote('')
-      setHighlight(null)
-
-      if (!plan || week <= CURRENT_WEEK || week >= WEEKS_IN_PLAN) return
-      if (!isWeekEmpty(plan, week)) return
-
-      const result = generateWeeks(plan, preferences, {
-        startWeek: week,
-        days: DAYS_PER_WEEK,
-      })
-      if (result.error) return
-
-      setPlan({ ...plan, weeks: result.weeks })
-    },
-    [plan, preferences, setPlan],
-  )
-
   const value = useMemo(
     () => ({
       plan,
-      currentWeek,
+      dates,
+      today: todayISO(),
       status,
       error,
       notice,
@@ -662,11 +614,13 @@ export function MealPlanProvider({ children }) {
       highlight,
       busySlot,
       canUndo: Boolean(undoSnapshot),
-      undoWeek: undoSnapshot?.week ?? null,
       publishedPlans,
+      empty: isPlanEmpty(plan),
+      confirmedDates: plan.confirmedDates ?? null,
       generatePlan,
-      regenerateWeek,
-      clearWeek,
+      regeneratePlan,
+      clearPlan,
+      clearDay,
       setSlot,
       setSlotServings,
       renameSlotRecipe,
@@ -675,18 +629,17 @@ export function MealPlanProvider({ children }) {
       toggleSavedSlot,
       requestAlternative,
       fitToBudget,
-      confirmWeek,
+      confirmPlan,
       copySharedWeek,
       copySharedDay,
-      publishWeek,
+      publishPlan,
       undo,
       dismissError,
       dismissNote,
-      goToWeek,
     }),
     [
       plan,
-      currentWeek,
+      dates,
       status,
       error,
       notice,
@@ -696,8 +649,9 @@ export function MealPlanProvider({ children }) {
       undoSnapshot,
       publishedPlans,
       generatePlan,
-      regenerateWeek,
-      clearWeek,
+      regeneratePlan,
+      clearPlan,
+      clearDay,
       setSlot,
       setSlotServings,
       renameSlotRecipe,
@@ -706,14 +660,13 @@ export function MealPlanProvider({ children }) {
       toggleSavedSlot,
       requestAlternative,
       fitToBudget,
-      confirmWeek,
+      confirmPlan,
       copySharedWeek,
       copySharedDay,
-      publishWeek,
+      publishPlan,
       undo,
       dismissError,
       dismissNote,
-      goToWeek,
     ],
   )
 

@@ -1,12 +1,12 @@
 // Requirement 7.2: the sample-data path used when the planner service is
 // unavailable. It runs the same generator the live plan does, only against the
-// bundled catalog, so allergy and diet filtering behave identically.
+// bundled catalog, so the avoid list and diet filtering behave identically.
 
-import { CURRENT_WEEK } from './constants.js'
 import { SAMPLE_RECIPES } from './sampleRecipes.js'
+import { sanitizePlanDates } from './dates.js'
 import { mergeCustomRecipes } from './customRecipes.js'
 import { fillsSlot, isRecipeCompliant } from './mealFilters.js'
-import { createEmptyPlan, generateWeeks, recipeCostPerServing } from './planner.js'
+import { createEmptyPlan, generateDays, recipeCostPerServing } from './planner.js'
 
 const sampleCatalog = () =>
   SAMPLE_RECIPES.map((recipe) => ({
@@ -21,24 +21,21 @@ export function emptyDemoPlan(customRecipes = []) {
   return createEmptyPlan(mergeCustomRecipes(sampleCatalog(), customRecipes))
 }
 
-// Week 0 is shown as an already-completed week so the Plan view has history to
-// tab back to, the way a returning user would.
-function seedCompletedWeek(plan, preferences) {
-  const result = generateWeeks(plan, preferences, { startWeek: 0, days: 7 })
-  return result.error ? plan : { ...plan, weeks: result.weeks }
-}
-
 export function generateDemoPlan(preferences, customRecipes = []) {
-  const base = seedCompletedWeek(emptyDemoPlan(customRecipes), preferences)
+  const dates = sanitizePlanDates(preferences.planDates ?? [])
 
-  const result = generateWeeks(base, preferences, {
-    startWeek: CURRENT_WEEK,
-    days: Math.max(1, Number(preferences.planningPeriod) || 1),
-  })
+  if (!dates.length) {
+    throw new Error(
+      'Pick the days you want on the calendar in Setup, then build the plan.',
+    )
+  }
+
+  const base = emptyDemoPlan(customRecipes)
+  const result = generateDays(base, preferences, { dates })
 
   if (result.error) throw new Error(result.error)
 
-  return { ...base, weeks: result.weeks, warnings: result.warnings }
+  return { ...base, days: result.days, warnings: result.warnings }
 }
 
 // A local stand-in for the planner's alternative endpoint.

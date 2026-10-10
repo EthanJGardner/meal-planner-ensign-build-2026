@@ -5,7 +5,7 @@ import {
   MEAL_SLOTS,
   SLOT_LABELS,
 } from '../../lib/constants'
-import { detectedAllergens } from '../../lib/allergySafety'
+import { detectedAllergens } from '../../lib/avoid'
 import {
   blankDraft,
   blankIngredient,
@@ -211,7 +211,7 @@ export function RecipeFormModal({ recipe = null, onClose, onSaved }) {
 
             <Field
               id="recipe-time"
-              label="Cooking time (min)"
+              label="Prep time (min)"
               error={show('cookTimeMinutes')}
             >
               <input

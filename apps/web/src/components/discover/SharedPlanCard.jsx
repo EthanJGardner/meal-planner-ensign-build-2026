@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { CURRENT_WEEK, SLOT_LABELS, MEAL_SLOTS, WEEK_DAYS, WEEKS_IN_PLAN } from '../../lib/constants'
+import { SLOT_LABELS, MEAL_SLOTS } from '../../lib/constants'
+import { shiftISO, shortDateISO, todayISO } from '../../lib/dates'
 import {
   describeSharedPlan,
   scoreSharedPlan,
@@ -14,10 +15,13 @@ export function SharedPlanCard({ shared, isClosest }) {
   const { plan, copySharedWeek, copySharedDay } = useMealPlan()
 
   const [open, setOpen] = useState(false)
-  const [targetWeek, setTargetWeek] = useState(CURRENT_WEEK)
-  const [targetDay, setTargetDay] = useState(0)
+  // Requirement 5.6: a shared plan lands on real dates, so the only choice is
+  // the date it starts on. It defaults to the first day the user picked.
+  const [startDate, setStartDate] = useState(
+    () => preferences.planDates?.[0] ?? todayISO(),
+  )
 
-  const { score, reasons, allergenUnsafeCount, unsafeCount } = scoreSharedPlan(
+  const { score, reasons, avoidUnsafeCount, unsafeCount } = scoreSharedPlan(
     shared,
     plan.recipes,
     preferences,
@@ -57,10 +61,10 @@ export function SharedPlanCard({ shared, isClosest }) {
             {reason}
           </span>
         ))}
-        {allergenUnsafeCount ? (
+        {avoidUnsafeCount ? (
           <span className="chip chip--alert">
-            {allergenUnsafeCount} meal{allergenUnsafeCount > 1 ? 's' : ''} contain
-            an allergen you avoid — swapped on add
+            {avoidUnsafeCount} meal{avoidUnsafeCount > 1 ? 's' : ''} contain
+            something you cannot have — swapped on add
           </span>
         ) : unsafeCount ? (
           <span className="chip chip--warn">
@@ -78,8 +82,9 @@ export function SharedPlanCard({ shared, isClosest }) {
               </li>
             ))
           : shared.days.slice(0, 4).map((day, index) => (
-              <li key={WEEK_DAYS[index]}>
-                {WEEK_DAYS[index].slice(0, 3)} dinner: {day[2]?.recipe ?? '—'}
+              <li key={shiftISO(startDate, index)}>
+                {shortDateISO(shiftISO(startDate, index))} dinner:{' '}
+                {day[2]?.recipe ?? '—'}
               </li>
             ))}
         {shared.kind === 'weekly' ? <li>and 3 more dinners</li> : null}
@@ -98,57 +103,28 @@ export function SharedPlanCard({ shared, isClosest }) {
       </div>
 
       <div className="plan-card__actions">
-        {shared.kind === 'daily' ? (
-          <>
-            <label className="inline-field">
-              <span>Add to</span>
-              <select
-                value={targetDay}
-                onChange={(event) => setTargetDay(Number(event.target.value))}
-              >
-                {WEEK_DAYS.map((day, index) => (
-                  <option key={day} value={index}>
-                    {day}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              className="button button--accent"
-              onClick={() => copySharedDay(shared, targetDay)}
-            >
-              Add to my plan
-            </button>
-          </>
-        ) : (
-          <>
-            <label className="inline-field">
-              <span>Add to</span>
-              <select
-                value={targetWeek}
-                onChange={(event) => setTargetWeek(Number(event.target.value))}
-              >
-                {Array.from({ length: WEEKS_IN_PLAN - CURRENT_WEEK }, (_, offset) => {
-                  const week = CURRENT_WEEK + offset
-                  return (
-                    <option key={week} value={week}>
-                      Week {week + 1}
-                      {week === CURRENT_WEEK ? ' (this week)' : ''}
-                    </option>
-                  )
-                })}
-              </select>
-            </label>
-            <button
-              type="button"
-              className="button button--accent"
-              onClick={() => copySharedWeek(shared, targetWeek)}
-            >
-              Add to my plan
-            </button>
-          </>
-        )}
+        <label className="inline-field">
+          <span>{shared.kind === 'daily' ? 'Add to' : 'Start on'}</span>
+          <input
+            type="date"
+            className="input input--date"
+            min={todayISO()}
+            value={startDate}
+            onChange={(event) => setStartDate(event.target.value || todayISO())}
+          />
+        </label>
+        <button
+          type="button"
+          className="button button--accent"
+          disabled={!startDate || startDate < todayISO()}
+          onClick={() =>
+            shared.kind === 'daily'
+              ? copySharedDay(shared, startDate)
+              : copySharedWeek(shared, startDate)
+          }
+        >
+          Add to my plan
+        </button>
       </div>
 
       {open ? (

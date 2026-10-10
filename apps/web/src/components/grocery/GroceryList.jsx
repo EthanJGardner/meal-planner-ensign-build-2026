@@ -1,18 +1,33 @@
+import { planRangeLabel } from '../../lib/dates'
 import { useGroceryList } from '../../hooks/useGroceryList'
 import { useHousehold } from '../../hooks/useHousehold'
+import { usePlanSummary } from '../../hooks/usePlanSummary'
 import { CheckoutPanel } from './CheckoutPanel'
 
 export function GroceryList() {
-  const { items, total, mealCount, week } = useGroceryList()
+  const { items, total, mealCount, dates } = useGroceryList()
   const { preferences } = useHousehold()
+  const { swaps } = usePlanSummary()
+
+  // Requirement 5.4: the list holds the replacement, not the ingredient the
+  // recipe was written with, so the shopper is told before they buy.
+  const swappedIn = new Set(swaps.map((swap) => swap.to))
 
   return (
     <>
       <p className="panel__lede">
         Built from the {mealCount} {mealCount === 1 ? 'meal' : 'meals'} you
-        confirmed in Week {week + 1}, sized for your household of{' '}
+        confirmed across {dates.length} {dates.length === 1 ? 'day' : 'days'} (
+        {planRangeLabel(dates)}), sized for your household of{' '}
         {preferences.householdSize}. Leftover slots buy nothing extra.
       </p>
+
+      {swaps.length ? (
+        <p className="alert alert--soft">
+          {swaps.map((swap) => `We swapped ${swap.from} for ${swap.to}.`).join(' ')}{' '}
+          The replacements are what is on this list.
+        </p>
+      ) : null}
 
       <div className="table-wrap">
         <table className="data-table">
@@ -27,7 +42,12 @@ export function GroceryList() {
           <tbody>
             {items.map((item) => (
               <tr key={item.key}>
-                <th scope="row">{item.name}</th>
+                <th scope="row">
+                  {item.name}
+                  {swappedIn.has(item.name) ? (
+                    <span className="chip chip--good chip--inline">swapped in</span>
+                  ) : null}
+                </th>
                 <td>
                   {item.quantity} {item.unit}
                 </td>

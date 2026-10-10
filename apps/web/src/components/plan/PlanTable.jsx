@@ -1,15 +1,16 @@
-import { MEAL_SLOTS, SLOT_LABELS, WEEK_DAYS } from '../../lib/constants'
+import { MEAL_SLOTS, SLOT_LABELS } from '../../lib/constants'
+import { shortDateISO, weekdayISO } from '../../lib/dates'
 import { dayIssues, dayNutrition } from '../../lib/planner'
 import { useHousehold } from '../../hooks/useHousehold'
 import { useMealPlan } from '../../hooks/useMealPlan'
 import { SlotPicker } from './SlotPicker'
 
-function CheckCell({ week, day }) {
+function CheckCell({ date }) {
   const { plan } = useMealPlan()
   const { preferences } = useHousehold()
 
-  const issues = dayIssues(plan, week, day, preferences)
-  const nutrition = dayNutrition(plan, week, day)
+  const issues = dayIssues(plan, date, preferences)
+  const nutrition = dayNutrition(plan, date)
 
   const calorieGoal = Number(preferences.nutritionGoals?.calories) || 0
   const proteinGoal = Number(preferences.nutritionGoals?.protein) || 0
@@ -46,14 +47,18 @@ function CheckCell({ week, day }) {
   )
 }
 
-export function PlanTable({ week, onOpenRecipe }) {
-  const { highlight } = useMealPlan()
+// Requirement 5.3: one row per day the plan covers, in date order, each labelled
+// by its date first and then the day of the week. There is no week to choose
+// between any more: the plan is the days the user picked, however many there
+// are and however far apart.
+export function PlanTable({ onOpenRecipe }) {
+  const { plan, dates, highlight, today, clearDay } = useMealPlan()
 
   return (
     <div className="table-wrap">
       <table className="plan-table">
         <caption className="visually-hidden">
-          Meals for each day of week {week + 1}, with a status check per day
+          Meals for each day of your plan, with a status check per day
         </caption>
         <thead>
           <tr>
@@ -67,26 +72,45 @@ export function PlanTable({ week, onOpenRecipe }) {
           </tr>
         </thead>
         <tbody>
-          {WEEK_DAYS.map((dayName, day) => {
-            const isNew =
-              highlight?.week === week && highlight.days.includes(day)
+          {dates.map((date) => {
+            const isNew = highlight.includes(date)
+            const isToday = date === today
+            const filled = (plan.days?.[date] ?? []).some((slot) => slot.recipe)
+
+            const rowClass = [isNew ? 'is-new' : '', isToday ? 'is-today' : '']
+              .filter(Boolean)
+              .join(' ')
 
             return (
-              <tr key={dayName} className={isNew ? 'is-new' : undefined}>
+              <tr key={date} className={rowClass || undefined}>
                 <th scope="row" className="plan-table__day">
-                  {dayName}
+                  <span className="plan-table__date">{shortDateISO(date)}</span>
+                  <span className="plan-table__weekday">
+                    {weekdayISO(date)}
+                  </span>
+                  {isToday ? (
+                    <span className="plan-table__today">Today</span>
+                  ) : null}
+                  {filled ? (
+                    <button
+                      type="button"
+                      className="link-button plan-table__clear"
+                      onClick={() => clearDay(date)}
+                    >
+                      Clear
+                    </button>
+                  ) : null}
                 </th>
                 {MEAL_SLOTS.map((slot, slotIndex) => (
                   <td key={slot}>
                     <SlotPicker
-                      week={week}
-                      day={day}
+                      date={date}
                       slotIndex={slotIndex}
                       onOpenRecipe={onOpenRecipe}
                     />
                   </td>
                 ))}
-                <CheckCell week={week} day={day} />
+                <CheckCell date={date} />
               </tr>
             )
           })}

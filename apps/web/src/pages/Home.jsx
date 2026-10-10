@@ -1,6 +1,4 @@
 import { useState } from 'react'
-import { CURRENT_WEEK } from '../lib/constants'
-import { isWeekEmpty } from '../lib/planner'
 import { CustomRecipeProvider } from '../contexts/CustomRecipeProvider'
 import { HouseholdProvider } from '../contexts/HouseholdProvider'
 import { MealPlanProvider } from '../contexts/MealPlanProvider'
@@ -11,11 +9,11 @@ import { PlanView } from '../components/plan/PlanView'
 import { GroceryView } from '../components/grocery/GroceryView'
 
 function Shell() {
-  const { plan } = useMealPlan()
+  const { plan, empty } = useMealPlan()
   const [view, setView] = useState('setup')
 
-  const groceryReady = plan.confirmedWeek !== null && plan.confirmedWeek !== undefined
-  const hasPlan = !isWeekEmpty(plan, CURRENT_WEEK)
+  const groceryReady = Boolean(plan.confirmedDates?.length)
+  const hasPlan = !empty
 
   // The plan step is only meaningful once something has been planned.
   const current = view === 'plan' && !hasPlan ? 'setup' : view

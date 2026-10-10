@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { CURRENT_WEEK, cookingTimeLabel } from '../../lib/constants'
-import { isWeekEmpty } from '../../lib/planner'
+import { prepTimeLabel } from '../../lib/constants'
+import { planRangeLabel } from '../../lib/dates'
 import { useHousehold } from '../../hooks/useHousehold'
 import { useMealPlan } from '../../hooks/useMealPlan'
 import { usePlanSummary } from '../../hooks/usePlanSummary'
@@ -10,48 +10,34 @@ import { RecipeFormModal } from '../recipes/RecipeFormModal'
 import { PlanSummary } from './PlanSummary'
 import { PlanTable } from './PlanTable'
 import { RecipeModal } from './RecipeModal'
-import { WeekTabs } from './WeekTabs'
-
-const weekStatus = (week) => {
-  if (week < CURRENT_WEEK) {
-    return 'Week 1 is done. The meals from that week are kept here as a record.'
-  }
-  if (week === CURRENT_WEEK) {
-    return 'This is the week built from your setup. Change a dinner and the next day’s leftovers follow it.'
-  }
-  return `Week ${week + 1} is planned ahead, with leftovers carried over from the week before.`
-}
 
 export function PlanView({ onEditSetup, onGoToGrocery }) {
   const { preferences } = useHousehold()
   const {
-    plan,
-    currentWeek,
+    dates,
+    empty,
+    confirmedDates,
     note,
     error,
     notice,
     canUndo,
-    undoWeek,
     undo,
-    regenerateWeek,
-    clearWeek,
+    regeneratePlan,
+    clearPlan,
     fitToBudget,
-    confirmWeek,
-    publishWeek,
+    confirmPlan,
+    publishPlan,
     dismissNote,
     dismissError,
   } = useMealPlan()
 
   const [openRecipe, setOpenRecipe] = useState(null)
   const [editRecipe, setEditRecipe] = useState(null)
-  const summary = usePlanSummary(currentWeek)
+  const summary = usePlanSummary()
 
-  const empty = isWeekEmpty(plan, currentWeek)
-  const confirmed = plan.confirmedWeek === currentWeek
-
-  const avoiding = preferences.allergies.length
-    ? `Avoiding ${preferences.allergies.join(', ')}`
-    : 'No allergies'
+  const confirmed = Boolean(confirmedDates?.length)
+  const avoid = preferences.avoid ?? []
+  const picked = preferences.planDates?.length ?? 0
 
   return (
     <>
@@ -60,13 +46,15 @@ export function PlanView({ onEditSetup, onGoToGrocery }) {
       <div className="summary-strip">
         <p className="summary-strip__text">
           {preferences.householdSize}{' '}
-          {preferences.householdSize === 1 ? 'person' : 'people'} ·{' '}
-          {preferences.planningPeriod} days · ${preferences.budget} ·{' '}
-          {avoiding}
+          {preferences.householdSize === 1 ? 'person' : 'people'} · {picked}{' '}
+          {picked === 1 ? 'day' : 'days'} (
+          {planRangeLabel(preferences.planDates ?? [])}) · $
+          {preferences.budget} ·{' '}
+          {avoid.length ? `No ${avoid.join(', ')}` : 'Nothing ruled out'}
           {preferences.dietaryRestrictions.length
             ? ` · ${preferences.dietaryRestrictions.join(', ')}`
             : ''}{' '}
-          · {cookingTimeLabel(preferences.cookingTime)}
+          · Prep: {prepTimeLabel(preferences.cookingTime).toLowerCase()}
         </p>
         <button type="button" className="button button--small" onClick={onEditSetup}>
           Edit setup
@@ -80,24 +68,24 @@ export function PlanView({ onEditSetup, onGoToGrocery }) {
           }`}
         >
           Estimated cost ${summary.cost.toFixed(2)}
-          {summary.allowedBudget
+          {summary.budget
             ? summary.overBudget
               ? ` · over by $${summary.overBudgetBy.toFixed(2)}`
               : ' · within budget'
             : ''}
         </p>
 
-        <button type="button" className="button button--accent" onClick={() => fitToBudget(currentWeek)}>
+        <button type="button" className="button button--accent" onClick={fitToBudget}>
           Fit to budget
         </button>
-        <button type="button" className="button" onClick={() => publishWeek(currentWeek)}>
-          Share this week
+        <button type="button" className="button" onClick={publishPlan}>
+          Share this plan
         </button>
-        <button type="button" className="button" onClick={() => regenerateWeek(currentWeek)}>
-          Remake this week
+        <button type="button" className="button" onClick={() => regeneratePlan()}>
+          Remake every day
         </button>
-        <button type="button" className="button" onClick={() => clearWeek(currentWeek)}>
-          Clear this week
+        <button type="button" className="button" onClick={clearPlan}>
+          Clear the plan
         </button>
         <button
           type="button"
@@ -126,50 +114,64 @@ export function PlanView({ onEditSetup, onGoToGrocery }) {
         </Banner>
       ))}
 
+      {summary.swaps.length ? (
+        <Banner variant="notice" title="Ingredients we swapped">
+          <ul className="swap-list">
+            {summary.swaps.map((swap) => (
+              <li key={`${swap.meal}-${swap.from}-${swap.to}`}>
+                We swapped {swap.from} for {swap.to}{' '}
+                <span className="swap-list__meal">in {swap.meal}</span>
+              </li>
+            ))}
+          </ul>
+          Check the labels on the replacements before you cook.
+        </Banner>
+      ) : null}
+
       {note ? (
         <Banner variant="notice" title="What changed" onDismiss={dismissNote}>
           {note}
           {canUndo ? (
             <p className="banner__action">
               <button type="button" className="button button--small" onClick={undo}>
-                Undo the change to Week {undoWeek + 1}
+                Undo that change
               </button>
             </p>
           ) : null}
         </Banner>
       ) : null}
 
-      <WeekTabs />
-      <p className="week-status">{weekStatus(currentWeek)}</p>
-
-      {empty ? (
+      {empty && !dates.length ? (
         <section className="panel panel--empty">
-          <h2 className="panel__title">Nothing planned for this week yet</h2>
+          <h2 className="panel__title">Nothing planned yet</h2>
           <p className="panel__lede">
-            Build it from your setup, or copy a week from someone with a
-            lifestyle like yours in Discover.
+            Pick the days you want on the calendar in Setup, then build a plan
+            from them, or copy one from someone with a lifestyle like yours in
+            Discover.
           </p>
           <button
             type="button"
             className="button button--primary button--large"
-            onClick={() => regenerateWeek(currentWeek)}
+            onClick={onEditSetup}
           >
-            Generate this week
+            Back to setup
           </button>
         </section>
       ) : (
         <>
-          <PlanSummary week={currentWeek} />
-          <PlanTable week={currentWeek} onOpenRecipe={setOpenRecipe} />
+          <PlanSummary />
+          <PlanTable onOpenRecipe={setOpenRecipe} />
 
           <div className="confirm-bar">
             <div>
               <h2 className="confirm-bar__title">
-                {confirmed ? 'This week is confirmed' : 'Happy with this week?'}
+                {confirmed ? 'This plan is confirmed' : 'Happy with this plan?'}
               </h2>
               <p className="confirm-bar__lede">
                 {confirmed
-                  ? 'Your grocery list is built from these meals. Change a meal and it updates.'
+                  ? `Your grocery list is built from the ${confirmedDates.length} ${
+                      confirmedDates.length === 1 ? 'day' : 'days'
+                    } you confirmed. Change a meal and it updates.`
                   : 'Confirm it to turn these meals into a grocery list you can check out.'}
               </p>
             </div>
@@ -177,10 +179,10 @@ export function PlanView({ onEditSetup, onGoToGrocery }) {
               <button
                 type="button"
                 className="button button--primary button--large"
-                onClick={() => confirmWeek(currentWeek)}
-                disabled={Boolean(summary.problemDays.length)}
+                onClick={confirmPlan}
+                disabled={Boolean(summary.problemDays.length) || empty}
               >
-                {confirmed ? 'Re-confirm this week' : 'Confirm this week'}
+                {confirmed ? 'Re-confirm this plan' : 'Confirm this plan'}
               </button>
               {confirmed ? (
                 <button type="button" className="button" onClick={onGoToGrocery}>
@@ -203,24 +205,28 @@ export function PlanView({ onEditSetup, onGoToGrocery }) {
         <h2 className="how-to__title">How to use this</h2>
         <ul className="how-to__list">
           <li>
-            Pick a recipe or a Leftovers option for any meal. Leftovers come from
-            a meal cooked earlier in the plan.
+            Every day you picked gets its own row, in date order, with today
+            marked. Add or remove days on the calendar in Setup.
+          </li>
+          <li>
+            Pick a recipe or a Leftovers option for any meal. Leftovers come
+            from a meal cooked the day before.
           </li>
           <li>
             The small box beside each meal is the number of people. Leave it
             blank to use your household size.
           </li>
           <li>
-            Change an allergy or diet in Setup and unsafe meals are swapped
-            automatically, with a note telling you what moved.
+            Change what you cannot have, or a diet, in Setup and unsafe meals
+            are swapped automatically, with a note telling you what moved.
+          </li>
+          <li>
+            Where one ingredient is the only problem, we swap that ingredient
+            instead of the whole meal and say so above the plan.
           </li>
           <li>
             Red text in Check means something needs fixing. The grey line is
             calories and protein per person for that day.
-          </li>
-          <li>
-            Your own recipes show up in every dropdown they fit, marked
-            &ldquo;yours&rdquo;. Add one here, or manage them all in Setup.
           </li>
         </ul>
       </section>

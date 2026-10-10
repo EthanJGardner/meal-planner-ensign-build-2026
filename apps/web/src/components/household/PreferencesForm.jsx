@@ -1,9 +1,6 @@
-import {
-  COOKING_TIME_OPTIONS,
-  DIETARY_RESTRICTIONS,
-  PLANNING_PERIOD_OPTIONS,
-} from '../../lib/constants'
+import { DIETARY_RESTRICTIONS, PREP_TIME_OPTIONS } from '../../lib/constants'
 import { useHousehold } from '../../hooks/useHousehold'
+import { PlanDatePicker } from './PlanDatePicker'
 
 export function PreferencesForm() {
   const { preferences, setPreference, setNutritionGoal, toggleRestriction } =
@@ -35,25 +32,7 @@ export function PreferencesForm() {
           </p>
         </div>
 
-        <div className="field">
-          <label className="field__label" htmlFor="planning-period">
-            Planning period
-          </label>
-          <select
-            id="planning-period"
-            className="input"
-            value={preferences.planningPeriod}
-            onChange={(event) =>
-              setPreference('planningPeriod', Number(event.target.value))
-            }
-          >
-            {PLANNING_PERIOD_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        <PlanDatePicker />
       </fieldset>
 
       <fieldset className="fieldset">
@@ -74,21 +53,21 @@ export function PreferencesForm() {
 
         <div className="field">
           <label className="field__label" htmlFor="food-preferences">
-            Foods you love or want to avoid
+            Foods you love
           </label>
           <textarea
             id="food-preferences"
             className="input input--textarea"
             rows="3"
-            placeholder="e.g. lots of chicken, no mushrooms, kid-friendly dinners"
+            placeholder="e.g. lots of chicken, kid-friendly dinners"
             value={preferences.foodPreferences}
             onChange={(event) =>
               setPreference('foodPreferences', event.target.value)
             }
           />
           <p className="field__hint">
-            Start a phrase with &ldquo;no&rdquo; or &ldquo;avoid&rdquo; to rule
-            something out. Everything else nudges the plan towards it.
+            Everything here nudges the plan towards it. Anything you want kept
+            out belongs in the list above, where we match it exactly.
           </p>
         </div>
       </fieldset>
@@ -148,29 +127,32 @@ export function PreferencesForm() {
             }
           />
           <p className="field__hint">
-            Meals are chosen to stay inside this. We tell you when that is not
-            possible.
+            Meals are chosen to stay inside this, split across the days you
+            picked. We tell you when that is not possible.
           </p>
         </div>
 
         <div className="field">
-          <label className="field__label" htmlFor="cooking-time">
-            Time per meal
+          <label className="field__label" htmlFor="prep-time">
+            Prep time
           </label>
           <select
-            id="cooking-time"
+            id="prep-time"
             className="input"
             value={preferences.cookingTime}
             onChange={(event) =>
               setPreference('cookingTime', Number(event.target.value))
             }
           >
-            {COOKING_TIME_OPTIONS.map((option) => (
+            {PREP_TIME_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
           </select>
+          <p className="field__hint">
+            How long you want to spend making any one meal.
+          </p>
         </div>
       </fieldset>
     </div>

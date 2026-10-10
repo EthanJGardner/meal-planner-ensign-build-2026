@@ -16,15 +16,12 @@ export const WEEK_DAYS = [
   'Sunday',
 ]
 
-export const WEEKS_IN_PLAN = 5
-
-// Week 0 is the completed week kept for reference; week 1 is the week the user
-// is planning now. Earlier weeks are never regenerated.
-export const CURRENT_WEEK = 1
-
 // Requirement 5.3: the same meal must not reappear within this many days.
 export const COOL_OFF_DAYS = 2
 
+// The allergens on the standard list. These are matched against a recipe with
+// the keyword table in avoid.js, and a recipe that declares one is
+// blocked whether or not the scan can see it in the ingredients.
 export const COMMON_ALLERGENS = [
   'Peanuts',
   'Tree nuts',
@@ -48,19 +45,36 @@ export const DIETARY_RESTRICTIONS = [
   'Gluten-free',
 ]
 
-export const COOKING_TIME_OPTIONS = [
+// Prep time is the user-facing name for the per-meal time limit. The recipe
+// field behind it is still `cookTimeMinutes`, which is the name the planner
+// API contract uses.
+export const PREP_TIME_OPTIONS = [
   { label: 'Under 15 min', value: 15 },
   { label: 'Under 30 min', value: 30 },
   { label: 'Under 45 min', value: 45 },
   { label: 'Under 60 min', value: 60 },
-  { label: 'Any time', value: 0 },
+  { label: 'Any amount of time', value: 0 },
 ]
 
-export const PLANNING_PERIOD_OPTIONS = [
-  { label: '3 days', value: 3 },
-  { label: '5 days', value: 5 },
-  { label: '7 days', value: 7 },
-  { label: '14 days', value: 14 },
+// Requirement 5.1: everything the household will not eat lives in one list,
+// whether the reason is an allergy or a dislike, and every entry is followed
+// strictly. These are the non-allergen ingredients offered alongside the
+// standard allergens; anything on either list may be worked around by swapping
+// that one ingredient out (lib/substitutions.js) rather than dropping the
+// recipe, under the safety rules documented there.
+export const OTHER_AVOIDED_INGREDIENTS = [
+  'Mushrooms',
+  'Onions',
+  'Tomatoes',
+  'Bell peppers',
+  'Olives',
+  'Cilantro',
+  'Avocado',
+  'Coconut',
+  'Tofu',
+  'Mayonnaise',
+  'Spinach',
+  'Zucchini',
 ]
 
 // Marks a recipe the user typed in themselves, as opposed to one from the
@@ -77,9 +91,13 @@ export const MEAL_STATUS = {
   REJECTED: 'rejected',
 }
 
+// `planDates` is the list of calendar days the user picked, as YYYY-MM-DD.
+// `planningPeriod` is not stored: it is derived from how many days are picked,
+// so the budget split and the plan copy only ever have one source of truth.
 export const DEFAULT_PREFERENCES = {
   householdSize: 2,
-  allergies: [],
+  // One strict list: allergens and disliked ingredients together.
+  avoid: [],
   dietaryRestrictions: [],
   foodPreferences: '',
   nutritionGoals: {
@@ -88,9 +106,9 @@ export const DEFAULT_PREFERENCES = {
   },
   budget: 100,
   cookingTime: 30,
-  planningPeriod: 5,
+  planDates: [],
 }
 
-export const cookingTimeLabel = (value) =>
-  COOKING_TIME_OPTIONS.find((option) => option.value === Number(value))?.label ??
-  'Any time'
+export const prepTimeLabel = (value) =>
+  PREP_TIME_OPTIONS.find((option) => option.value === Number(value))?.label ??
+  'Any amount of time'

@@ -25,7 +25,7 @@ export function AppHeader({ view, onNavigate, groceryReady }) {
           >
             {step.label}
             {step.id === 'grocery' && !groceryReady ? (
-              <span className="app-nav__hint">confirm a week first</span>
+              <span className="app-nav__hint">confirm your plan first</span>
             ) : null}
           </button>
         ))}

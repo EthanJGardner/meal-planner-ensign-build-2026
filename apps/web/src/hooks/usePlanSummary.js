@@ -1,21 +1,22 @@
 import { useMemo } from 'react'
-import { MEAL_SLOTS, WEEK_DAYS } from '../lib/constants'
+import { MEAL_SLOTS } from '../lib/constants'
+import { shortDateISO } from '../lib/dates'
 import {
-  allowedWeekBudget,
   dayIssues,
   dayNutrition,
   findRecipe,
-  plannedDayCount,
-  weekCost,
+  planCost,
+  plannedDates,
 } from '../lib/planner'
+import { hasSwaps } from '../lib/substitutions'
 import { useHousehold } from './useHousehold'
 import { useMealPlan } from './useMealPlan'
 
 const round = (value) => Math.round(value * 100) / 100
 
-// Requirement 5.3: aggregated nutrition and cost for the week on screen,
-// measured against the user's goals and budget.
-export function usePlanSummary(week) {
+// Requirement 5.3: aggregated nutrition and cost for the whole plan, measured
+// against the user's goals and budget.
+export function usePlanSummary() {
   const { plan } = useMealPlan()
   const { preferences } = useHousehold()
 
@@ -23,32 +24,9 @@ export function usePlanSummary(week) {
     const calorieGoal = Number(preferences.nutritionGoals?.calories) || 0
     const proteinGoal = Number(preferences.nutritionGoals?.protein) || 0
     const servings = Math.max(1, Number(preferences.householdSize) || 1)
+    const budget = Number(preferences.budget) || 0
 
-    if (!plan) {
-      return {
-        plannedDays: 0,
-        filledSlots: 0,
-        totalSlots: 0,
-        cost: 0,
-        allowedBudget: 0,
-        overBudget: false,
-        overBudgetBy: 0,
-        calories: 0,
-        protein: 0,
-        carbs: 0,
-        fat: 0,
-        calorieGoal,
-        proteinGoal,
-        servings,
-        problemDays: [],
-        savedCount: 0,
-        warnings: [],
-        source: null,
-      }
-    }
-
-    const days = plan.weeks[week]
-    const plannedDays = plannedDayCount(plan, week)
+    const dates = plan ? plannedDates(plan) : []
 
     let calories = 0
     let protein = 0
@@ -57,40 +35,54 @@ export function usePlanSummary(week) {
     let filledSlots = 0
     let savedCount = 0
     const problemDays = []
+    // Requirement 5.4: every ingredient swap in the plan, so the user is told
+    // what we changed rather than finding it in the recipe later.
+    const swaps = new Map()
 
-    days.forEach((day, dayIndex) => {
-      const nutrition = dayNutrition(plan, week, dayIndex)
+    for (const date of dates) {
+      const nutrition = dayNutrition(plan, date)
       calories += nutrition.calories
       protein += nutrition.protein
       filledSlots += nutrition.filled
 
-      for (const slot of day) {
+      for (const slot of plan.days[date]) {
         if (slot.saved) savedCount += 1
         const recipe = findRecipe(plan, slot.recipe)
+
+        if (hasSwaps(recipe)) {
+          for (const swap of recipe.swaps) {
+            swaps.set(`${recipe.name}|${swap.from}|${swap.to}`, {
+              meal: recipe.name,
+              from: swap.from,
+              to: swap.to,
+            })
+          }
+        }
+
         if (!recipe?.nutritionPerServing) continue
         carbs += recipe.nutritionPerServing.carbs ?? 0
         fat += recipe.nutritionPerServing.fat ?? 0
       }
 
-      if (dayIssues(plan, week, dayIndex, preferences).length) {
-        problemDays.push(WEEK_DAYS[dayIndex])
+      if (dayIssues(plan, date, preferences).length) {
+        problemDays.push(shortDateISO(date))
       }
-    })
+    }
 
     // Macros are stored per serving, so dividing by the planned days gives one
     // person's daily intake.
-    const divisor = Math.max(plannedDays, 1)
-    const cost = weekCost(plan, week, preferences)
-    const allowed = allowedWeekBudget(plan, week, preferences)
+    const divisor = Math.max(dates.length, 1)
+    const cost = plan ? planCost(plan, preferences) : 0
 
     return {
-      plannedDays,
+      dates,
+      plannedDays: dates.length,
       filledSlots,
-      totalSlots: days.length * MEAL_SLOTS.length,
+      totalSlots: dates.length * MEAL_SLOTS.length,
       cost,
-      allowedBudget: allowed,
-      overBudget: allowed > 0 && cost > allowed,
-      overBudgetBy: allowed > 0 ? round(Math.max(0, cost - allowed)) : 0,
+      budget,
+      overBudget: budget > 0 && cost > budget,
+      overBudgetBy: budget > 0 ? round(Math.max(0, cost - budget)) : 0,
       calories: Math.round(calories / divisor),
       protein: Math.round(protein / divisor),
       carbs: Math.round(carbs / divisor),
@@ -100,8 +92,9 @@ export function usePlanSummary(week) {
       servings,
       problemDays,
       savedCount,
-      warnings: plan.warnings ?? [],
-      source: plan.source ?? null,
+      swaps: [...swaps.values()],
+      warnings: plan?.warnings ?? [],
+      source: plan?.source ?? null,
     }
-  }, [plan, preferences, week])
+  }, [plan, preferences])
 }

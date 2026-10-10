@@ -1,18 +1,22 @@
 import { SLOT_LABELS, MEAL_SLOTS } from '../../lib/constants'
+import { longDateISO } from '../../lib/dates'
 import {
   decodeSlotValue,
   encodeSlotValue,
+  emptySlot,
   slotOptions,
 } from '../../lib/planner'
 import { useHousehold } from '../../hooks/useHousehold'
 import { useMealPlan } from '../../hooks/useMealPlan'
 
-export function SlotPicker({ week, day, slotIndex, onOpenRecipe }) {
+export function SlotPicker({ date, slotIndex, onOpenRecipe }) {
   const { plan, setSlot, setSlotServings } = useMealPlan()
   const { preferences } = useHousehold()
 
-  const slot = plan.weeks[week][day][slotIndex]
-  const { options, leftovers } = slotOptions(plan, week, day, slotIndex, preferences)
+  // A day the user has just picked has no slots in the plan yet, so it renders
+  // as an empty row the dropdowns can fill.
+  const slot = plan.days?.[date]?.[slotIndex] ?? emptySlot()
+  const { options, leftovers } = slotOptions(plan, date, slotIndex, preferences)
   const value = encodeSlotValue(slot.recipe, slot.leftover)
 
   // A slot can hold a meal the dropdown no longer offers, such as leftovers
@@ -26,7 +30,7 @@ export function SlotPicker({ week, day, slotIndex, onOpenRecipe }) {
         }
       : null
 
-  const label = `${SLOT_LABELS[MEAL_SLOTS[slotIndex]]} on day ${day + 1}`
+  const label = `${SLOT_LABELS[MEAL_SLOTS[slotIndex]]} on ${longDateISO(date)}`
 
   return (
     <div className="slot">
@@ -35,7 +39,7 @@ export function SlotPicker({ week, day, slotIndex, onOpenRecipe }) {
         aria-label={label}
         value={value}
         onChange={(event) =>
-          setSlot(week, day, slotIndex, decodeSlotValue(event.target.value))
+          setSlot(date, slotIndex, decodeSlotValue(event.target.value))
         }
       >
         <option value="">Choose a meal</option>
@@ -68,7 +72,7 @@ export function SlotPicker({ week, day, slotIndex, onOpenRecipe }) {
         aria-label={`People for ${label}`}
         value={slot.servings ?? ''}
         onChange={(event) =>
-          setSlotServings(week, day, slotIndex, event.target.value)
+          setSlotServings(date, slotIndex, event.target.value)
         }
       />
 
@@ -76,7 +80,7 @@ export function SlotPicker({ week, day, slotIndex, onOpenRecipe }) {
         <button
           type="button"
           className="button button--ghost button--small"
-          onClick={() => onOpenRecipe({ week, day, slotIndex })}
+          onClick={() => onOpenRecipe({ date, slotIndex })}
         >
           Recipe
         </button>

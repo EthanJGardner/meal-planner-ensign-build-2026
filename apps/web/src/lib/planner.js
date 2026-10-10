@@ -1,16 +1,18 @@
 // Plan generation and the derived values the Plan view renders.
 //
-// A plan is a grid: weeks[week][day][slot]. Each cell names a recipe from the
-// plan's own catalog rather than embedding it, so leftovers can point at the
-// meal they came from and a recipe swap only has to be applied once.
+// A plan is a map of calendar dates to days: days['2026-10-14'] is an array of
+// one slot per meal. Only the days the user asked for are in the map, so a plan
+// can cover any set of dates, any distance ahead, with gaps.
+//
+// Each slot names a recipe from the plan's own catalog rather than embedding
+// it, so leftovers can point at the meal they came from and an ingredient swap
+// only has to be applied once.
 
 import {
   COOL_OFF_DAYS,
-  CURRENT_WEEK,
   CUSTOM_RECIPE_SOURCE,
   MEAL_SLOTS,
   MEAL_STATUS,
-  WEEKS_IN_PLAN,
 } from './constants.js'
 import {
   fillsSlot,
@@ -19,8 +21,14 @@ import {
   preferredFoodMatches,
   recipeProblems,
 } from './mealFilters.js'
-
-const DAYS_PER_WEEK = 7
+import { hasSwaps } from './substitutions.js'
+import {
+  daysBetweenISO,
+  isPastISO,
+  sanitizePlanDates,
+  shiftISO,
+  shortDateISO,
+} from './dates.js'
 
 const round = (value, places = 2) => {
   const factor = 10 ** places
@@ -40,10 +48,15 @@ export const emptySlot = () => ({
   saved: false,
 })
 
-const emptyDay = () => MEAL_SLOTS.map(() => emptySlot())
-const emptyWeek = () => Array.from({ length: DAYS_PER_WEEK }, emptyDay)
+export const emptyDay = () => MEAL_SLOTS.map(() => emptySlot())
 
-export const emptyWeeks = () => Array.from({ length: WEEKS_IN_PLAN }, emptyWeek)
+export const cloneDays = (days = {}) =>
+  Object.fromEntries(
+    Object.entries(days).map(([date, slots]) => [
+      date,
+      slots.map((slot) => ({ ...slot })),
+    ]),
+  )
 
 export function createEmptyPlan(recipes) {
   return {
@@ -51,11 +64,34 @@ export function createEmptyPlan(recipes) {
     createdAt: new Date().toISOString(),
     source: 'sample-data',
     recipes,
-    weeks: emptyWeeks(),
-    confirmedWeek: null,
+    days: {},
+    confirmedDates: null,
     warnings: [],
   }
 }
+
+// --- the dates a plan covers -------------------------------------------------
+
+// Chronological, because an ISO day string sorts the same way the calendar
+// does. Past days drop out: a plan is what is still ahead of you.
+export function plannedDates(plan) {
+  return Object.keys(plan?.days ?? {})
+    .filter((date) => plan.days[date].some((slot) => slot.recipe))
+    .filter((date) => !isPastISO(date))
+    .sort()
+}
+
+// Every date the Plan view shows: what has been planned, plus anything the user
+// has picked but not generated yet, so a newly ticked day appears as an empty
+// row rather than not at all.
+export function visibleDates(plan, preferences) {
+  const picked = sanitizePlanDates(preferences?.planDates ?? [])
+  return [...new Set([...plannedDates(plan), ...picked])].sort()
+}
+
+export const isPlanEmpty = (plan) => plannedDates(plan).length === 0
+
+export const dayAt = (plan, date) => plan?.days?.[date] ?? null
 
 // --- catalog -----------------------------------------------------------------
 
@@ -85,41 +121,28 @@ export const slotServings = (slot, preferences) => {
   return override >= 1 ? override : Math.max(1, Number(preferences.householdSize) || 1)
 }
 
-const flatIndex = (week, day, slotIndex) =>
-  (week * DAYS_PER_WEEK + day) * MEAL_SLOTS.length + slotIndex
+// Walks the plan in date order so a leftover slot can prove its source meal was
+// cooked before it.
+function cookedBefore(days, date, slotIndex, name) {
+  for (const other of Object.keys(days).sort()) {
+    if (other > date) break
 
-// Walks the whole plan in order so a leftover slot can prove its source meal
-// was cooked before it.
-function cookedBefore(plan, week, day, slotIndex, name) {
-  const limit = flatIndex(week, day, slotIndex)
-
-  for (let w = 0; w < plan.weeks.length; w += 1) {
-    for (let d = 0; d < DAYS_PER_WEEK; d += 1) {
-      for (let s = 0; s < MEAL_SLOTS.length; s += 1) {
-        if (flatIndex(w, d, s) >= limit) return false
-        const cell = plan.weeks[w][d][s]
-        if (!cell.leftover && cell.recipe === name) return true
-      }
+    const limit = other === date ? slotIndex : MEAL_SLOTS.length
+    for (let slot = 0; slot < limit; slot += 1) {
+      const cell = days[other][slot]
+      if (cell && !cell.leftover && cell.recipe === name) return true
     }
   }
 
   return false
 }
 
-export function isWeekEmpty(plan, week) {
-  return plan.weeks[week].every((day) => day.every((slot) => !slot.recipe))
-}
-
-export function plannedDayCount(plan, week) {
-  return plan.weeks[week].filter((day) => day.some((slot) => slot.recipe)).length
-}
-
 // --- status and totals -------------------------------------------------------
 
 // Requirement 5.3: every planned day reports either OK or the problems to fix.
-function slotIssues(plan, week, day, slotIndex, preferences) {
-  const slot = plan.weeks[week][day][slotIndex]
-  if (!slot.recipe) return []
+function slotIssues(plan, date, slotIndex, preferences) {
+  const slot = dayAt(plan, date)?.[slotIndex]
+  if (!slot?.recipe) return []
 
   const issues = []
   const recipe = findRecipe(plan, slot.recipe)
@@ -133,8 +156,8 @@ function slotIssues(plan, week, day, slotIndex, preferences) {
     issues.push(problem.message)
   }
 
-  if (slot.leftover && !cookedBefore(plan, week, day, slotIndex, slot.recipe)) {
-    issues.push(`Cook ${slot.recipe} earlier in the plan first`)
+  if (slot.leftover && !cookedBefore(plan.days, date, slotIndex, slot.recipe)) {
+    issues.push(`Cook ${slot.recipe} on an earlier day first`)
   }
 
   if (slot.servings !== null && !(Number(slot.servings) >= 1)) {
@@ -144,18 +167,18 @@ function slotIssues(plan, week, day, slotIndex, preferences) {
   return issues
 }
 
-export function dayIssues(plan, week, day, preferences) {
+export function dayIssues(plan, date, preferences) {
   return MEAL_SLOTS.flatMap((_, slotIndex) =>
-    slotIssues(plan, week, day, slotIndex, preferences),
+    slotIssues(plan, date, slotIndex, preferences),
   )
 }
 
-export function dayNutrition(plan, week, day) {
+export function dayNutrition(plan, date) {
   let calories = 0
   let protein = 0
   let filled = 0
 
-  for (const slot of plan.weeks[week][day]) {
+  for (const slot of dayAt(plan, date) ?? []) {
     const recipe = findRecipe(plan, slot.recipe)
     if (!recipe?.nutritionPerServing) continue
     calories += recipe.nutritionPerServing.calories ?? 0
@@ -166,11 +189,13 @@ export function dayNutrition(plan, week, day) {
   return { calories, protein, filled }
 }
 
-export function weekCost(plan, week, preferences) {
+// What the whole plan costs: every planned day, scaled to the servings each
+// meal is cooked for. Leftover slots buy nothing.
+export function planCost(plan, preferences) {
   let total = 0
 
-  for (const day of plan.weeks[week]) {
-    for (const slot of day) {
+  for (const date of plannedDates(plan)) {
+    for (const slot of plan.days[date]) {
       if (!slot.recipe || slot.leftover) continue
       const recipe = findRecipe(plan, slot.recipe)
       if (!recipe) continue
@@ -179,14 +204,6 @@ export function weekCost(plan, week, preferences) {
   }
 
   return round(total)
-}
-
-// The slice of the overall budget this week's planned days are entitled to.
-export function allowedWeekBudget(plan, week, preferences) {
-  const budget = Number(preferences.budget) || 0
-  const period = Number(preferences.planningPeriod) || 1
-  if (!budget) return 0
-  return round((budget / period) * Math.max(plannedDayCount(plan, week), 1))
 }
 
 // --- generation --------------------------------------------------------------
@@ -210,12 +227,12 @@ function buildPools(recipes, preferences) {
       isRecipeSelectable(recipe, preferences),
     )
 
-    // Cooking time is a preference, not a safety rule, so it is the one filter
-    // we relax rather than returning an empty plan.
+    // Prep time is a preference, not a safety rule, so it is the one filter we
+    // relax rather than returning an empty plan.
     if (!pool.length && safeAndCompliant.length) {
       pool = safeAndCompliant
       warnings.push(
-        `No ${slot} recipe fits your time limit, so the limit was relaxed for ${slot}.`,
+        `No ${slot} recipe fits your prep-time limit, so the limit was relaxed for ${slot}.`,
       )
     }
 
@@ -227,16 +244,17 @@ function buildPools(recipes, preferences) {
 
 const costFor = (recipe, servings) => recipeCostPerServing(recipe) * servings
 
-// Blocked if the recipe was used within the cool-off window.
-const inCoolOff = (usage, name, dayIndex) => {
+// Blocked if the recipe was used within the cool-off window, counted in real
+// calendar days so a gap in the picked dates counts towards it.
+const inCoolOff = (usage, name, date) => {
   const last = usage.get(name)
-  return last !== undefined && dayIndex - last <= COOL_OFF_DAYS
+  return last !== undefined && daysBetweenISO(last, date) <= COOL_OFF_DAYS
 }
 
 function pickDay({
   pools,
   preferences,
-  dayIndex,
+  date,
   dayBudget,
   servings,
   usage,
@@ -248,7 +266,7 @@ function pickDay({
 
   const allowed = (pool) => {
     if (relaxCoolOff) return pool
-    const fresh = pool.filter((recipe) => !inCoolOff(usage, recipe.name, dayIndex))
+    const fresh = pool.filter((recipe) => !inCoolOff(usage, recipe.name, date))
     return fresh.length ? fresh : pool
   }
 
@@ -296,6 +314,9 @@ function pickDay({
 
         for (const recipe of [breakfast, lunch.recipe, dinner]) {
           score -= preferredFoodMatches(recipe, preferences.foodPreferences).length * 8
+          // A recipe that only fits because an ingredient was swapped out is a
+          // fallback, not a first choice, so it loses to a natural fit.
+          score += (recipe.swaps?.length ?? 0) * 12
         }
 
         if (!best || score < best.score) {
@@ -308,127 +329,125 @@ function pickDay({
   return best
 }
 
-// Fills `days` days starting at `startWeek`, leaving every other week alone.
-export function generateWeeks(plan, preferences, { startWeek, days }) {
+// Requirement 5.3: fills exactly the dates it is given and leaves every other
+// day in the plan alone, so a plan can cover Monday, Thursday and the weekend
+// after next without touching the days in between.
+export function generateDays(plan, preferences, { dates = [] } = {}) {
+  const targets = sanitizePlanDates(dates)
+
+  if (!targets.length) {
+    return {
+      error:
+        'No upcoming days are picked. Choose the days you want on the calendar in Setup.',
+    }
+  }
+
   const { pools, warnings } = buildPools(plan.recipes, preferences)
 
   const empty = MEAL_SLOTS.filter((slot) => !pools[slot].length)
   if (empty.length) {
     return {
-      error: `No recipe is both allergy-safe and compliant for ${empty.join(', ')} with these choices. Remove an allergy or a dietary restriction and try again.`,
+      error: `Nothing in the recipe list works for ${empty.join(', ')} with these choices. Take something off the list of ingredients you cannot have, or drop a dietary restriction, and try again.`,
     }
   }
 
-  const weeks = plan.weeks.map((week) => week.map((day) => day.map((slot) => ({ ...slot }))))
-  const lastDay = Math.min(
-    startWeek * DAYS_PER_WEEK + days,
-    WEEKS_IN_PLAN * DAYS_PER_WEEK,
-  )
-  const total = lastDay - startWeek * DAYS_PER_WEEK
-
-  for (let offset = 0; offset < total; offset += 1) {
-    const absolute = startWeek * DAYS_PER_WEEK + offset
-    weeks[Math.floor(absolute / DAYS_PER_WEEK)][absolute % DAYS_PER_WEEK] = emptyDay()
-  }
+  const days = cloneDays(plan.days)
+  for (const date of targets) days[date] = emptyDay()
 
   const servings = Math.max(1, Number(preferences.householdSize) || 1)
   const budget = Number(preferences.budget) || 0
-  const weekShare = budget
-    ? (budget / (Number(preferences.planningPeriod) || 1)) * total
-    : 0
+  const pickedCount = Math.max(
+    sanitizePlanDates(preferences.planDates ?? []).length,
+    targets.length,
+  )
+  // The share of the budget these days are entitled to, out of every day the
+  // user picked.
+  const runShare = budget ? (budget / pickedCount) * targets.length : 0
 
-  // Carry the dinner from the day before this run so leftovers stay continuous
-  // across a week boundary.
+  // Leftovers only work from the calendar day immediately before, so the dinner
+  // carried into this run has to belong to the day before the first target.
   let previousDinner = null
-  if (startWeek > 0) {
-    const handover = weeks[startWeek - 1][DAYS_PER_WEEK - 1][2]
-    if (handover.recipe && !handover.leftover) {
-      const recipe = findRecipe(plan, handover.recipe)
-      if (recipe && pools.lunch.some((option) => option.name === recipe.name)) {
-        previousDinner = recipe
-      }
+  let previousDate = null
+  const handover = days[shiftISO(targets[0], -1)]?.[2]
+
+  if (handover?.recipe && !handover.leftover) {
+    const recipe = findRecipe(plan, handover.recipe)
+    if (recipe && pools.lunch.some((option) => option.name === recipe.name)) {
+      previousDinner = recipe
+      previousDate = shiftISO(targets[0], -1)
     }
   }
 
   const usage = new Map()
   let spent = 0
 
-  for (let offset = 0; offset < total; offset += 1) {
-    const absolute = startWeek * DAYS_PER_WEEK + offset
-    const week = Math.floor(absolute / DAYS_PER_WEEK)
-    const day = absolute % DAYS_PER_WEEK
-    const remaining = total - offset
-    const dayBudget = weekShare ? Math.max((weekShare - spent) / remaining, 1) : 0
+  for (const [position, date] of targets.entries()) {
+    const remaining = targets.length - position
+    const dayBudget = runShare ? Math.max((runShare - spent) / remaining, 1) : 0
+    const reheatable =
+      previousDate && daysBetweenISO(previousDate, date) === 1
+        ? previousDinner
+        : null
 
-    let best = pickDay({
+    const options = {
       pools,
       preferences,
-      dayIndex: offset,
+      date,
       dayBudget,
       servings,
       usage,
-      previousDinner,
-      relaxCoolOff: false,
-    })
-
-    if (!best) {
-      best = pickDay({
-        pools,
-        preferences,
-        dayIndex: offset,
-        dayBudget,
-        servings,
-        usage,
-        previousDinner,
-        relaxCoolOff: true,
-      })
+      previousDinner: reheatable,
     }
+
+    const best =
+      pickDay({ ...options, relaxCoolOff: false }) ??
+      pickDay({ ...options, relaxCoolOff: true })
 
     if (!best) {
       return {
         error:
-          'We could not assemble a full day from the recipes that match your choices. Try relaxing a restriction or the time limit.',
+          'We could not assemble a full day from the recipes that match your choices. Try relaxing a restriction or the prep-time limit.',
       }
     }
 
-    weeks[week][day][0] = { ...emptySlot(), recipe: best.breakfast.name }
-    weeks[week][day][1] = {
+    days[date][0] = { ...emptySlot(), recipe: best.breakfast.name }
+    days[date][1] = {
       ...emptySlot(),
       recipe: best.lunch.recipe.name,
       leftover: best.lunch.leftover,
     }
-    weeks[week][day][2] = { ...emptySlot(), recipe: best.dinner.name }
+    days[date][2] = { ...emptySlot(), recipe: best.dinner.name }
 
-    usage.set(best.breakfast.name, offset)
-    if (!best.lunch.leftover) usage.set(best.lunch.recipe.name, offset)
-    usage.set(best.dinner.name, offset)
+    usage.set(best.breakfast.name, date)
+    if (!best.lunch.leftover) usage.set(best.lunch.recipe.name, date)
+    usage.set(best.dinner.name, date)
 
     spent += best.cost
     previousDinner = best.dinner
+    previousDate = date
   }
 
-  const overBudget = weekShare > 0 && spent > weekShare
-  if (overBudget) {
+  if (runShare > 0 && spent > runShare) {
     warnings.push(
-      `The cheapest compliant plan we could build costs about $${round(spent).toFixed(2)}, which is over the $${round(weekShare).toFixed(2)} share of your budget for these days. Try "Fit to budget" or raise the budget.`,
+      `The cheapest plan we could build for these days costs about $${round(spent).toFixed(2)}, which is over the $${round(runShare).toFixed(2)} they are entitled to out of your budget. Try "Fit to budget" or raise the budget.`,
     )
   }
 
-  return { weeks, warnings, spent: round(spent) }
+  return { days, warnings, spent: round(spent) }
 }
 
 // --- editing actions ---------------------------------------------------------
 
 // Repeating a meal close to itself is exactly what the cool-off rule exists to
 // prevent, so candidates are penalised by how near their other uses are. This
-// keeps swaps from collapsing a whole week onto one cheap recipe.
-function varietyPenalty(weeks, week, name, day) {
+// keeps swaps from collapsing a whole plan onto one cheap recipe.
+function varietyPenalty(days, name, date) {
   let penalty = 0
 
-  for (let d = 0; d < DAYS_PER_WEEK; d += 1) {
-    for (const slot of weeks[week][d]) {
+  for (const other of Object.keys(days)) {
+    for (const slot of days[other]) {
       if (slot.leftover || slot.recipe !== name) continue
-      const gap = Math.abs(d - day)
+      const gap = Math.abs(daysBetweenISO(other, date))
       penalty += gap <= COOL_OFF_DAYS ? 400 / (gap + 1) : 40
     }
   }
@@ -438,10 +457,10 @@ function varietyPenalty(weeks, week, name, day) {
 
 // Requirement 5.3 applies to edits too, not just generation: a swap must never
 // put the same meal back inside the cool-off window.
-function violatesCoolOff(weeks, week, name, day) {
-  for (let d = 0; d < DAYS_PER_WEEK; d += 1) {
-    if (Math.abs(d - day) > COOL_OFF_DAYS) continue
-    for (const slot of weeks[week][d]) {
+function violatesCoolOff(days, name, date) {
+  for (const other of Object.keys(days)) {
+    if (Math.abs(daysBetweenISO(other, date)) > COOL_OFF_DAYS) continue
+    for (const slot of days[other]) {
       if (!slot.leftover && slot.recipe === name) return true
     }
   }
@@ -450,7 +469,7 @@ function violatesCoolOff(weeks, week, name, day) {
 }
 
 // The closest compliant stand-in for a recipe that can no longer be used.
-function replacementFor(weeks, recipes, recipe, slotIndex, preferences, week, day) {
+function replacementFor(days, recipes, recipe, slotIndex, preferences, date) {
   const slot = MEAL_SLOTS[slotIndex]
 
   const candidates = recipes.filter(
@@ -464,23 +483,29 @@ function replacementFor(weeks, recipes, recipe, slotIndex, preferences, week, da
   const target = recipe?.nutritionPerServing?.calories ?? 0
   const rank = (option) =>
     Math.abs((option.nutritionPerServing?.calories ?? 0) - target) +
-    varietyPenalty(weeks, week, option.name, day) +
-    recipeCostPerServing(option) * 5
+    varietyPenalty(days, option.name, date) +
+    recipeCostPerServing(option) * 5 +
+    // Prefer a recipe that fits as written over one that needed a swap.
+    (option.swaps?.length ?? 0) * 60
 
   return [...candidates].sort((a, b) => rank(a) - rank(b))[0]
 }
 
 // The latest meal actually cooked before this slot that could fill it.
-function mostRecentCooked(probe, week, day, slotIndex, preferences) {
+function mostRecentCooked(days, recipes, date, slotIndex, preferences) {
   const slot = MEAL_SLOTS[slotIndex]
+  const earlier = Object.keys(days)
+    .sort()
+    .filter((other) => other <= date)
+    .reverse()
 
-  for (let d = day; d >= 0; d -= 1) {
-    const from = d === day ? slotIndex : MEAL_SLOTS.length
-    for (let s = from - 1; s >= 0; s -= 1) {
-      const cell = probe.weeks[week][d][s]
+  for (const other of earlier) {
+    const from = other === date ? slotIndex : MEAL_SLOTS.length
+    for (let index = from - 1; index >= 0; index -= 1) {
+      const cell = days[other][index]
       if (!cell.recipe || cell.leftover) continue
 
-      const recipe = probe.recipes.find((item) => item.name === cell.recipe)
+      const recipe = recipes.find((item) => item.name === cell.recipe)
       if (!recipe || !fillsSlot(recipe, slot)) continue
       if (!isRecipeCompliant(recipe, preferences)) continue
 
@@ -492,25 +517,23 @@ function mostRecentCooked(probe, week, day, slotIndex, preferences) {
 }
 
 // Requirement 5.3: a leftover slot must reference a meal cooked earlier in the
-// plan. After a swap, re-point anything orphaned at whatever did get cooked, or
-// clear it when there is nothing left to reheat.
-function repairLeftovers(weeks, recipes, week, preferences) {
-  const probe = { weeks, recipes }
-
-  for (let day = 0; day < DAYS_PER_WEEK; day += 1) {
+// plan, on the day before. After a swap, re-point anything orphaned at whatever
+// did get cooked, or clear it when there is nothing left to reheat.
+function repairLeftovers(days, recipes, preferences) {
+  for (const date of Object.keys(days).sort()) {
     for (let slotIndex = 0; slotIndex < MEAL_SLOTS.length; slotIndex += 1) {
-      const slot = weeks[week][day][slotIndex]
+      const slot = days[date][slotIndex]
       if (!slot.recipe || !slot.leftover) continue
 
       const recipe = recipes.find((item) => item.name === slot.recipe)
       const intact =
         recipe &&
         isRecipeCompliant(recipe, preferences) &&
-        cookedBefore(probe, week, day, slotIndex, slot.recipe)
+        cookedBefore(days, date, slotIndex, slot.recipe)
 
       if (intact) continue
 
-      const source = mostRecentCooked(probe, week, day, slotIndex, preferences)
+      const source = mostRecentCooked(days, recipes, date, slotIndex, preferences)
       slot.recipe = source
       slot.leftover = Boolean(source)
     }
@@ -519,31 +542,32 @@ function repairLeftovers(weeks, recipes, week, preferences) {
 
 // Requirement 5.3: when a safety-relevant preference changes, swap the meals
 // that are no longer allowed and report what moved.
-export function resyncWeek(plan, week, preferences) {
-  const weeks = plan.weeks.map((w) =>
-    w.map((day) => day.map((slot) => ({ ...slot }))),
-  )
+export function resyncPlan(plan, preferences) {
+  const days = cloneDays(plan.days)
   const changes = []
 
-  for (let day = 0; day < DAYS_PER_WEEK; day += 1) {
+  for (const date of Object.keys(days).sort()) {
+    // A day already behind us is a record of what was eaten, not something to
+    // correct.
+    if (isPastISO(date)) continue
+
     for (let slotIndex = 0; slotIndex < MEAL_SLOTS.length; slotIndex += 1) {
-      const slot = weeks[week][day][slotIndex]
+      const slot = days[date][slotIndex]
       if (!slot.recipe || slot.leftover) continue
 
       const recipe = findRecipe(plan, slot.recipe)
       if (recipe && isRecipeCompliant(recipe, preferences)) continue
 
       const replacement = replacementFor(
-        weeks,
+        days,
         plan.recipes,
         recipe,
         slotIndex,
         preferences,
-        week,
-        day,
+        date,
       )
 
-      changes.push({ from: slot.recipe, to: replacement?.name ?? null })
+      changes.push({ date, from: slot.recipe, to: replacement?.name ?? null })
       slot.recipe = replacement?.name ?? null
       slot.leftover = false
       slot.status = MEAL_STATUS.PENDING
@@ -551,43 +575,27 @@ export function resyncWeek(plan, week, preferences) {
     }
   }
 
-  repairLeftovers(weeks, plan.recipes, week, preferences)
+  if (!changes.length) return { plan, changes }
 
-  return { weeks, changes }
+  repairLeftovers(days, plan.recipes, preferences)
+  return { plan: { ...plan, days }, changes }
 }
 
-export function resyncPlan(plan, preferences) {
-  let working = plan
-  const changes = []
-
-  // Week 0 is a completed week, kept as a record of what was actually eaten.
-  for (let week = CURRENT_WEEK; week < WEEKS_IN_PLAN; week += 1) {
-    const result = resyncWeek(working, week, preferences)
-    if (!result.changes.length) continue
-    working = { ...working, weeks: result.weeks }
-    changes.push(...result.changes)
-  }
-
-  return { plan: working, changes }
-}
-
-// Requirement 5.4: swap the priciest dinners down until the week fits, telling
+// Requirement 5.4: swap the priciest dinners down until the plan fits, telling
 // the user what moved.
-export function fitWeekToBudget(plan, week, preferences) {
-  const limit = allowedWeekBudget(plan, week, preferences)
+export function fitPlanToBudget(plan, preferences) {
+  const limit = Number(preferences.budget) || 0
   if (!limit) {
     return {
       plan,
       swaps: [],
       message:
-        'Set a grocery budget in Setup first, then we can fit the week to it.',
+        'Set a grocery budget in Setup first, then we can fit the plan to it.',
     }
   }
 
-  const weeks = plan.weeks.map((w) =>
-    w.map((day) => day.map((slot) => ({ ...slot }))),
-  )
-  const working = { ...plan, weeks }
+  const days = cloneDays(plan.days)
+  let working = { ...plan, days }
   const swaps = []
 
   const pool = plan.recipes.filter(
@@ -595,16 +603,18 @@ export function fitWeekToBudget(plan, week, preferences) {
       fillsSlot(recipe, 'dinner') && isRecipeSelectable(recipe, preferences),
   )
 
+  const dates = plannedDates(working)
+
   // Each pass downgrades the single most expensive dinner, then re-costs the
-  // week. Cost strictly falls, so this terminates.
-  for (let pass = 0; pass < DAYS_PER_WEEK * 2; pass += 1) {
-    if (weekCost(working, week, preferences) <= limit) break
+  // plan. Cost strictly falls, so this terminates.
+  for (let pass = 0; pass < dates.length * 2 + 2; pass += 1) {
+    if (planCost(working, preferences) <= limit) break
 
     let target = null
 
-    for (let day = 0; day < DAYS_PER_WEEK; day += 1) {
-      const slot = weeks[week][day][2]
-      if (!slot.recipe || slot.leftover) continue
+    for (const date of dates) {
+      const slot = days[date]?.[2]
+      if (!slot?.recipe || slot.leftover) continue
 
       const recipe = findRecipe(working, slot.recipe)
       if (!recipe) continue
@@ -612,52 +622,56 @@ export function fitWeekToBudget(plan, week, preferences) {
       const current = recipeCostPerServing(recipe)
       // A repeat is worth avoiding even at a few dollars more.
       const weigh = (option) =>
-        recipeCostPerServing(option) +
-        varietyPenalty(weeks, week, option.name, day) / 50
+        recipeCostPerServing(option) + varietyPenalty(days, option.name, date) / 50
 
       const cheaper = pool
         .filter(
           (option) =>
             recipeCostPerServing(option) < current &&
-            !violatesCoolOff(weeks, week, option.name, day),
+            !violatesCoolOff(days, option.name, date),
         )
         .sort((a, b) => weigh(a) - weigh(b))[0]
 
       if (cheaper && (!target || current > target.current)) {
-        target = { day, current, from: recipe.name, to: cheaper.name }
+        target = { date, current, from: recipe.name, to: cheaper.name }
       }
     }
 
     if (!target) break
 
-    weeks[week][target.day][2] = {
-      ...weeks[week][target.day][2],
+    days[target.date][2] = {
+      ...days[target.date][2],
       recipe: target.to,
       status: MEAL_STATUS.PENDING,
       saved: false,
     }
 
-    swaps.push({ from: target.from, to: target.to })
+    swaps.push({ date: target.date, from: target.from, to: target.to })
+    working = { ...plan, days }
   }
 
-  repairLeftovers(weeks, plan.recipes, week, preferences)
+  repairLeftovers(days, plan.recipes, preferences)
+  working = { ...plan, days }
 
-  const stillOver = weekCost(working, week, preferences) > limit
+  const stillOver = planCost(working, preferences) > limit
 
   let message
   if (!swaps.length) {
     message = stillOver
-      ? 'Nothing left to swap without repeating a meal too soon. This is the cheapest week these recipes allow, so raise the budget or shorten the planning period.'
-      : 'This week is already inside your budget.'
+      ? 'Nothing left to swap without repeating a meal too soon. This is the cheapest plan these recipes allow, so raise the budget or pick fewer days.'
+      : 'This plan is already inside your budget.'
   } else {
+    // A day can be downgraded more than once on the way to the budget, so the
+    // count is of days changed, not of passes made.
+    const changedDays = new Set(swaps.map((swap) => swap.date)).size
     const examples = swaps
       .slice(0, 3)
-      .map((swap) => `${swap.from} to ${swap.to}`)
+      .map((swap) => `${swap.from} to ${swap.to} on ${shortDateISO(swap.date)}`)
       .join(', ')
     const more = swaps.length > 3 ? `, and ${swaps.length - 3} more` : ''
-    message = `Swapped ${swaps.length} dinner${swaps.length > 1 ? 's' : ''} for cheaper options: ${examples}${more}.${
+    message = `Swapped the dinner on ${changedDays} ${changedDays === 1 ? 'day' : 'days'} for cheaper options: ${examples}${more}.${
       stillOver
-        ? ' That is as low as these recipes go without repeating a meal too soon, so raise the budget or shorten the planning period.'
+        ? ' That is as low as these recipes go without repeating a meal too soon, so raise the budget or pick fewer days.'
         : ''
     }`
   }
@@ -674,7 +688,8 @@ export function alternativesFor(plan, name, slotIndex, preferences, limit = 3) {
 
   const rank = (recipe) =>
     Math.abs((recipe.nutritionPerServing?.calories ?? 0) - target) +
-    recipeCostPerServing(recipe) * 5
+    recipeCostPerServing(recipe) * 5 +
+    (recipe.swaps?.length ?? 0) * 60
 
   return plan.recipes
     .filter(
@@ -701,12 +716,15 @@ export function decodeSlotValue(value) {
 
 // Every recipe that can fill this slot, plus leftovers of anything already
 // cooked earlier in the plan.
-export function slotOptions(plan, week, day, slotIndex, preferences) {
-  // A recipe the user wrote is called out so they can find it among the rest.
-  const optionLabel = (recipe) =>
-    recipe.source === CUSTOM_RECIPE_SOURCE
-      ? `${recipe.name} (yours)`
-      : recipe.name
+export function slotOptions(plan, date, slotIndex, preferences) {
+  // A recipe the user wrote is called out so they can find it among the rest,
+  // and so is one that only fits because an ingredient was swapped.
+  const optionLabel = (recipe) => {
+    const notes = []
+    if (recipe.source === CUSTOM_RECIPE_SOURCE) notes.push('yours')
+    if (hasSwaps(recipe)) notes.push('ingredient swapped')
+    return notes.length ? `${recipe.name} (${notes.join(', ')})` : recipe.name
+  }
 
   const options = recipesForSlot(plan, slotIndex).map((recipe) => {
     const problems = recipeProblems(recipe, preferences)
@@ -715,13 +733,13 @@ export function slotOptions(plan, week, day, slotIndex, preferences) {
       label: problems.length
         ? `${optionLabel(recipe)} — ${problems[0].message}`
         : optionLabel(recipe),
-      unsafe: problems.some((problem) => problem.kind === 'allergy'),
+      unsafe: problems.some((problem) => problem.kind === 'avoid'),
       problem: problems.length > 0,
     }
   })
 
   const leftovers = recipesForSlot(plan, slotIndex)
-    .filter((recipe) => cookedBefore(plan, week, day, slotIndex, recipe.name))
+    .filter((recipe) => cookedBefore(plan.days, date, slotIndex, recipe.name))
     .map((recipe) => ({
       value: encodeSlotValue(recipe.name, true),
       label: `Leftovers: ${optionLabel(recipe)}`,

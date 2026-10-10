@@ -1,4 +1,5 @@
 import { CUSTOM_RECIPE_SOURCE } from '../../lib/constants'
+import { describeSwaps, hasSwaps } from '../../lib/substitutions'
 
 const money = (value) => (value == null ? '—' : `$${Number(value).toFixed(2)}`)
 const round = (value) => Math.round(value * 100) / 100
@@ -13,7 +14,7 @@ const SOURCE_NOTES = {
     'Generated recipe. Nutrition, allergens and prices are estimates and are not verified.',
 }
 
-// Requirement 6: name, per-serving nutrition, cooking time, estimated cost,
+// Requirement 6: name, per-serving nutrition, prep time, estimated cost,
 // flagged allergens, ingredients and directions, with the estimate caveat.
 export function RecipeDetail({ recipe, servings, conflicts = [] }) {
   const nutrition = recipe.nutritionPerServing
@@ -22,13 +23,26 @@ export function RecipeDetail({ recipe, servings, conflicts = [] }) {
     0,
   )
 
+  // Requirement 5.4: an ingredient we changed is named here, next to the
+  // ingredient list it changed.
+  const swappedIn = new Set((recipe.swaps ?? []).map((swap) => swap.to))
+
   return (
     <div className="recipe">
       <p className="recipe__meta">
         Per serving · about {nutrition.calories} kcal · {nutrition.protein} g
-        protein · {recipe.cookTimeMinutes} min · about{' '}
+        protein · {recipe.cookTimeMinutes} min prep · about{' '}
         {money(perServingCost)} (estimates)
       </p>
+
+      {hasSwaps(recipe) ? (
+        <p className="recipe__swaps">
+          {describeSwaps(recipe)} The ingredient list and the cost below follow
+          the swap. The nutrition figures are still the original recipe&rsquo;s
+          estimate, and the directions may name the ingredient we replaced, so
+          read the label on whatever you buy instead.
+        </p>
+      ) : null}
 
       {recipe.allergens.length ? (
         <p className={conflicts.length ? 'recipe__allergens is-conflict' : 'recipe__allergens'}>
@@ -78,7 +92,12 @@ export function RecipeDetail({ recipe, servings, conflicts = [] }) {
           <tbody>
             {recipe.ingredients.map((ingredient) => (
               <tr key={`${ingredient.name}-${ingredient.unit}`}>
-                <td>{ingredient.name}</td>
+                <td>
+                  {ingredient.name}
+                  {swappedIn.has(ingredient.name) ? (
+                    <span className="chip chip--good chip--inline">swapped in</span>
+                  ) : null}
+                </td>
                 <td>
                   {round(ingredient.quantity * servings)} {ingredient.unit}
                 </td>
@@ -99,7 +118,7 @@ export function RecipeDetail({ recipe, servings, conflicts = [] }) {
 
       <section className="recipe__section">
         <h3 className="recipe__heading">
-          Directions · about {recipe.cookTimeMinutes} min
+          Directions · about {recipe.cookTimeMinutes} min prep
         </h3>
         <ol className="recipe__steps">
           {recipe.instructions.map((step) => (

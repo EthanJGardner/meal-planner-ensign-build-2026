@@ -1,28 +1,32 @@
 import { useMemo } from 'react'
 import { MEAL_STATUS } from '../lib/constants'
+import { isPastISO } from '../lib/dates'
 import { findRecipe, slotServings } from '../lib/planner'
 import { useHousehold } from './useHousehold'
 import { useMealPlan } from './useMealPlan'
 
 const round = (value) => Math.round(value * 100) / 100
 
-// Requirement 5.5: ingredients aggregated across the confirmed week, scaled to
-// the servings each meal is actually cooked for. Leftover slots buy nothing.
+// Requirement 5.5: ingredients aggregated across the days the user confirmed,
+// scaled to the servings each meal is actually cooked for. Leftover slots buy
+// nothing.
 export function useGroceryList() {
   const { plan } = useMealPlan()
   const { preferences } = useHousehold()
 
   return useMemo(() => {
-    const week = plan?.confirmedWeek
-    const empty = { items: [], total: 0, mealCount: 0, week: null }
+    const empty = { items: [], total: 0, mealCount: 0, dates: [] }
+    const confirmed = (plan?.confirmedDates ?? []).filter(
+      (date) => !isPastISO(date) && plan.days?.[date],
+    )
 
-    if (!plan || week === null || week === undefined) return empty
+    if (!plan || !confirmed.length) return empty
 
     const merged = new Map()
     let mealCount = 0
 
-    for (const day of plan.weeks[week]) {
-      for (const slot of day) {
+    for (const date of [...confirmed].sort()) {
+      for (const slot of plan.days[date]) {
         if (!slot.recipe || slot.leftover) continue
         if (slot.status === MEAL_STATUS.REJECTED) continue
 
@@ -66,7 +70,7 @@ export function useGroceryList() {
       items,
       total: round(items.reduce((sum, item) => sum + item.estimatedCost, 0)),
       mealCount,
-      week,
+      dates: [...confirmed].sort(),
     }
   }, [plan, preferences])
 }

@@ -4,8 +4,8 @@
 // These are sample personas with made-up prices, not real users. The cold-start
 // problem is real, and seeding is the team's answer to it for the demo.
 
-import { cookingTimeLabel } from './constants.js'
-import { allergenConflicts } from './allergySafety.js'
+import { prepTimeLabel } from './constants.js'
+import { avoidConflictLabels } from './avoid.js'
 import { isRecipeCompliant, matchesDiet } from './mealFilters.js'
 import { recipeCostPerServing } from './planner.js'
 
@@ -275,13 +275,13 @@ export function sharedPlanCost(shared, recipes, householdSize) {
 }
 
 // Requirement 5.6: rank browsed plans against the viewer's household size,
-// budget, allergies, diet and time per meal, out of 100.
+// budget, avoid list, diet and prep time, out of 100.
 export function scoreSharedPlan(shared, recipes, preferences) {
   const householdSize = Math.max(1, Number(preferences.householdSize) || 1)
   const budget = Number(preferences.budget) || 0
   const period = Number(preferences.planningPeriod) || 1
   const diets = preferences.dietaryRestrictions ?? []
-  const allergies = preferences.allergies ?? []
+  const avoid = preferences.avoid ?? []
   const cookingTime = Number(preferences.cookingTime) || 0
 
   let score = 0
@@ -322,7 +322,7 @@ export function scoreSharedPlan(shared, recipes, preferences) {
 
   if (!unsafe.length) {
     score += 20
-    if (allergies.length) reasons.push('Safe for your allergies')
+    if (avoid.length) reasons.push('Nothing you cannot have')
   }
 
   if (!diets.length) {
@@ -339,23 +339,23 @@ export function scoreSharedPlan(shared, recipes, preferences) {
   if (!cookingTime || slowest <= cookingTime) {
     score += 15
     if (cookingTime) {
-      reasons.push(`Meals ${cookingTimeLabel(cookingTime).toLowerCase()}`)
+      reasons.push(`Prep ${prepTimeLabel(cookingTime).toLowerCase()}`)
     }
   }
 
-  // A plan containing an allergen the household reacts to must never present
+  // A plan containing something the household cannot have must never present
   // as a good match, however well the budget and household size line up. The
   // cap keeps every unsafe plan below every safe one.
-  const allergenUnsafe = used.filter(
-    (recipe) => allergenConflicts(recipe, allergies).length > 0,
+  const avoidUnsafe = used.filter(
+    (recipe) => avoidConflictLabels(recipe, avoid).length > 0,
   )
-  if (allergenUnsafe.length) score = Math.min(score, 49)
+  if (avoidUnsafe.length) score = Math.min(score, 49)
 
   return {
     score,
     reasons,
     unsafeCount: unsafe.length,
-    allergenUnsafeCount: allergenUnsafe.length,
+    avoidUnsafeCount: avoidUnsafe.length,
   }
 }
 

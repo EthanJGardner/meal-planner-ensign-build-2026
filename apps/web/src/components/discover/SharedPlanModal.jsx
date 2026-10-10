@@ -1,21 +1,32 @@
 import { useState } from 'react'
-import { CURRENT_WEEK, SLOT_LABELS, MEAL_SLOTS, WEEK_DAYS, WEEKS_IN_PLAN } from '../../lib/constants'
+import { SLOT_LABELS, MEAL_SLOTS } from '../../lib/constants'
+import {
+  longDateISO,
+  shiftISO,
+  shortDateISO,
+  todayISO,
+  weekdayISO,
+} from '../../lib/dates'
 import { findRecipe } from '../../lib/planner'
 import { sharedPlanSlots } from '../../lib/sharedPlans'
-import { allergenConflicts } from '../../lib/allergySafety'
+import { avoidConflictLabels } from '../../lib/avoid'
 import { useHousehold } from '../../hooks/useHousehold'
 import { useMealPlan } from '../../hooks/useMealPlan'
 import { Modal } from '../common/Modal'
 import { RecipeDetail } from '../plan/RecipeDetail'
 
-// Requirement 5.6: see a browsed plan's recipes before committing to it.
+// Requirement 5.6: see a browsed plan's recipes before committing to it, then
+// land it on real dates. A shared plan is a run of days, so the only thing to
+// choose is the date it starts on — days of the week do not mean anything once
+// the plan is a set of calendar dates.
 export function SharedPlanModal({ shared, score, onClose }) {
   const { preferences } = useHousehold()
   const { plan, copySharedWeek, copySharedDay } = useMealPlan()
 
   const [viewing, setViewing] = useState(null)
-  const [targetWeek, setTargetWeek] = useState(CURRENT_WEEK)
-  const [targetDay, setTargetDay] = useState(0)
+  const [startDate, setStartDate] = useState(
+    () => preferences.planDates?.[0] ?? todayISO(),
+  )
 
   const recipe = viewing ? findRecipe(plan, viewing) : null
 
@@ -30,13 +41,15 @@ export function SharedPlanModal({ shared, score, onClose }) {
         <RecipeDetail
           recipe={recipe}
           servings={Math.max(1, Number(preferences.householdSize) || 1)}
-          conflicts={allergenConflicts(recipe, preferences.allergies ?? [])}
+          conflicts={avoidConflictLabels(recipe, preferences.avoid ?? [])}
         />
       </Modal>
     )
   }
 
   const rows = sharedPlanSlots(shared)
+  const daily = shared.kind === 'daily'
+  const landsOn = rows.map((_, offset) => shiftISO(startDate, offset))
 
   return (
     <Modal title={shared.title} onClose={onClose}>
@@ -48,7 +61,7 @@ export function SharedPlanModal({ shared, score, onClose }) {
         <table className="data-table">
           <thead>
             <tr>
-              <th scope="col">Day</th>
+              <th scope="col">Lands on</th>
               {MEAL_SLOTS.map((slot) => (
                 <th key={slot} scope="col">
                   {SLOT_LABELS[slot]}
@@ -58,9 +71,13 @@ export function SharedPlanModal({ shared, score, onClose }) {
           </thead>
           <tbody>
             {rows.map((row, index) => (
-              <tr key={WEEK_DAYS[index]}>
+              <tr key={landsOn[index]}>
                 <th scope="row">
-                  {shared.kind === 'daily' ? 'Today' : WEEK_DAYS[index].slice(0, 3)}
+                  {shortDateISO(landsOn[index])}
+                  <span className="data-table__muted">
+                    {' '}
+                    {weekdayISO(landsOn[index]).slice(0, 3)}
+                  </span>
                 </th>
                 {row.map((cell, slotIndex) => (
                   <td key={MEAL_SLOTS[slotIndex]}>
@@ -84,68 +101,39 @@ export function SharedPlanModal({ shared, score, onClose }) {
       </div>
 
       <div className="modal__actions">
-        {shared.kind === 'daily' ? (
-          <>
-            <label className="inline-field">
-              <span>Add to</span>
-              <select
-                value={targetDay}
-                onChange={(event) => setTargetDay(Number(event.target.value))}
-              >
-                {WEEK_DAYS.map((day, index) => (
-                  <option key={day} value={index}>
-                    {day}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              className="button button--accent"
-              onClick={() => {
-                copySharedDay(shared, targetDay)
-                onClose()
-              }}
-            >
-              Add this day to my plan
-            </button>
-          </>
-        ) : (
-          <>
-            <label className="inline-field">
-              <span>Add to</span>
-              <select
-                value={targetWeek}
-                onChange={(event) => setTargetWeek(Number(event.target.value))}
-              >
-                {Array.from({ length: WEEKS_IN_PLAN - CURRENT_WEEK }, (_, offset) => {
-                  const week = CURRENT_WEEK + offset
-                  return (
-                    <option key={week} value={week}>
-                      Week {week + 1}
-                      {week === CURRENT_WEEK ? ' (this week)' : ''}
-                    </option>
-                  )
-                })}
-              </select>
-            </label>
-            <button
-              type="button"
-              className="button button--accent"
-              onClick={() => {
-                copySharedWeek(shared, targetWeek)
-                onClose()
-              }}
-            >
-              Add this week to my plan
-            </button>
-          </>
-        )}
+        <label className="inline-field">
+          <span>{daily ? 'Add to' : 'Start on'}</span>
+          <input
+            type="date"
+            className="input input--date"
+            min={todayISO()}
+            value={startDate}
+            onChange={(event) => setStartDate(event.target.value || todayISO())}
+          />
+        </label>
+        <button
+          type="button"
+          className="button button--accent"
+          disabled={!startDate || startDate < todayISO()}
+          onClick={() => {
+            if (daily) copySharedDay(shared, startDate)
+            else copySharedWeek(shared, startDate)
+            onClose()
+          }}
+        >
+          {daily ? 'Add this day to my plan' : 'Add these days to my plan'}
+        </button>
       </div>
 
       <p className="fine-print">
-        Meals are re-checked against your own allergies and diet when you add
-        them, and anything that does not fit is swapped automatically.
+        {daily
+          ? `This lands on ${longDateISO(startDate)}.`
+          : `This lands on ${longDateISO(landsOn[0])} through ${longDateISO(
+              landsOn[landsOn.length - 1],
+            )}.`}{' '}
+        Those days join the ones you picked. Meals are re-checked against your
+        own setup when you add them, and anything that does not fit is swapped
+        automatically.
       </p>
     </Modal>
   )

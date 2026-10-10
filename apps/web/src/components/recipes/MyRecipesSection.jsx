@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { SLOT_LABELS } from '../../lib/constants'
-import { allergenConflicts } from '../../lib/allergySafety'
+import { avoidConflictLabels } from '../../lib/avoid'
 import { recipeCostPerServing } from '../../lib/planner'
 import { recipeProblems } from '../../lib/mealFilters'
 import { useCustomRecipes } from '../../hooks/useCustomRecipes'
@@ -13,7 +13,7 @@ function RecipeCard({ recipe, onView, onEdit, onDelete }) {
   const { preferences } = useHousehold()
   const [confirming, setConfirming] = useState(false)
 
-  const conflicts = allergenConflicts(recipe, preferences.allergies ?? [])
+  const conflicts = avoidConflictLabels(recipe, preferences.avoid ?? [])
   const problems = recipeProblems(recipe, preferences)
   const nutrition = recipe.nutritionPerServing
 
@@ -23,7 +23,7 @@ function RecipeCard({ recipe, onView, onEdit, onDelete }) {
 
       <p className="plan-card__by">
         {recipe.slots.map((slot) => SLOT_LABELS[slot]).join(' · ')} ·{' '}
-        {recipe.cookTimeMinutes} min · makes {recipe.enteredFor}
+        {recipe.cookTimeMinutes} min prep · makes {recipe.enteredFor}
       </p>
 
       <p className="plan-card__cost">
