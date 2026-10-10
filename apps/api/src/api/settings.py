@@ -34,6 +34,39 @@ class Settings(BaseSettings):
     agent_max_steps: int = 25
     agent_tool_timeout_seconds: float = 10.0
 
+    # Meal planner (api.meals). The search text is embedded with the model the
+    # recipes were loaded with: both must match scripts/ingest_recipes.py.
+    bedrock_embed_model_id: str = "amazon.titan-embed-text-v2:0"
+    embed_dimensions: int = 1024
+    # The model that writes the searches. Leave out to use BEDROCK_MODEL_ID.
+    # With LLM_PROVIDER=scripted no model is asked and fixed searches are used.
+    meal_query_model_id: str | None = None
+    # A TypeSafe API key, for the Jev allergen check. Without it no meal can be
+    # checked, so none is suggested.
+    jev_api: str | None = None
+    # Pinned, so a new model version can't change what counts as safe unnoticed.
+    jev_model: str = "jev-1.13.0"
+    # A recipe is dropped when Jev's probability that it has an allergen, or
+    # breaks a diet, is at or above these. Tried on 2026-10-10 with a household
+    # avoiding five allergens: hidden allergens scored 0.39 and up, and of the
+    # recipes the word lists passed, 0.15 dropped 48%, 0.2 36% and 0.3 25%.
+    allergen_block_probability: float = 0.2
+    diet_block_probability: float = 0.4
+    # Different dishes searched per meal type. Each is one embedding call, and
+    # they set how long a request takes: this Bedrock key allowed about 0.6 a
+    # second on 2026-10-10, so three meal types of 4 take 18 to 27 s. Raise it
+    # for more variety once the quota allows.
+    meal_ideas: int = 4
+    # Recipes kept per meal type after merging the searches, recipes sent to
+    # Jev at a time, and meal options kept per meal type.
+    meal_candidates: int = 50
+    meal_check_batch: int = 15
+    meal_options: int = 10
+    # How long a meal the user was shown stays out of new suggestions.
+    cooling_days: int = 14
+    # "Low carb": at most this share of a recipe's calories from carbohydrates.
+    low_carb_max_share: float = 0.26
+
     # Paying the stores through Stripe's Link CLI (its MCP server). Test mode is
     # forced in code. Needs Node, and `npx @stripe/link-cli auth login` done once.
     payments_enabled: bool = True

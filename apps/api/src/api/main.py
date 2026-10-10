@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI
 
+from api.meals.router import router as meals_router
+from api.meals.services import MealServices
 from api.runs.router import router as runs_router
 from api.settings import Settings, get_settings
 from api.wallet.link import LinkMcp, LinkWallet
@@ -29,9 +31,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.http = http
             app.state.storefront_http = storefront_http
             app.state.recipes_http = recipes_http
+            app.state.meals = meals = MealServices(config, recipes_http)
             try:
                 yield
             finally:
+                await meals.aclose()
                 # Runs still going are left as 'shopping' in the database and
                 # closed as failed when the user starts the next one.
                 runs = list(app.state.runs)
@@ -51,6 +55,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(runs_router)
+    app.include_router(meals_router)
     return app
 
 

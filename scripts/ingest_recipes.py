@@ -57,6 +57,8 @@ PAYLOAD_INDEXES = {
     "has_alcohol": models.PayloadSchemaType.BOOL,
     "total_min": models.PayloadSchemaType.INTEGER,
     "calories": models.PayloadSchemaType.FLOAT,
+    # Share of calories from carbohydrates, for the low-carb diet filter.
+    "carb_pct": models.PayloadSchemaType.FLOAT,
 }
 
 bedrock = boto3.client(
@@ -96,12 +98,13 @@ def load_recipes(path: Path, limit: int | None) -> pl.DataFrame:
 def ensure_collection(recreate: bool) -> None:
     if recreate and qdrant.collection_exists(COLLECTION):
         qdrant.delete_collection(COLLECTION)
-    if qdrant.collection_exists(COLLECTION):
-        return
-    qdrant.create_collection(
-        COLLECTION,
-        vectors_config=models.VectorParams(size=EMBED_DIM, distance=models.Distance.COSINE),
-    )
+    if not qdrant.collection_exists(COLLECTION):
+        qdrant.create_collection(
+            COLLECTION,
+            vectors_config=models.VectorParams(size=EMBED_DIM, distance=models.Distance.COSINE),
+        )
+    # Also on a collection that exists, so an index added here later reaches it.
+    # Creating one that is already there changes nothing.
     for field, schema in PAYLOAD_INDEXES.items():
         qdrant.create_payload_index(COLLECTION, field, schema)
 

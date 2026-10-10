@@ -13,6 +13,7 @@ React web app ──/api/*──► FastAPI (apps/api) ──► Kong :54321 ─
                 <user JWT> forwards it              └──────────► rest (PostgREST) ──► Postgres :54322
                               │                                    RLS: auth.uid() = user_id
                               ├──► Qdrant :6333 (recipe vectors)
+                              ├──► meal planner ──► Bedrock (query model, embeddings), Jev
                               └──► shopping agent ──► mock stores :8100, Bedrock model, Link
 ```
 
@@ -128,7 +129,7 @@ The app tables are defined in [supabase/schema.sql](../supabase/schema.sql) (the
 | `preferences` | Diet styles, likes/dislikes, household size, budget, plan length, and the shopping mode (`manual` or `auto`). One row per user. |
 | `nutrition_goals` | Daily macro targets plus optional body stats for the calculator (one row per user) |
 | `meal_option_sessions` | One generation run, with snapshots of the allergies, preferences and goals it used |
-| `meal_options` | Candidate recipes produced by a session, with compliance results and status |
+| `meal_options` | Candidate recipes produced by a session, with compliance results and status. The meal planner also sets which meal type each is for, and the day of the plan for the ones it shows. |
 | `meal_plans` | A saved plan, optionally linked to the session it came from. Keeps its own copy of household size and budget. |
 | `meal_plan_slots` | One meal in a plan (day + meal type). Stores a copy of the recipe and points at the meal option it came from. |
 | `favorites`, `feedback` | Hearts and like/dislike per recipe |
@@ -256,7 +257,7 @@ POST again with the payment credential
 | `wallet/` | Pays a store's checkout through Stripe's Link CLI, over its MCP server. |
 | `agent/` | The tool loop, the tools, and the model providers. |
 | `runs/` | The HTTP routes, turning a grocery list into the agent's shopping list, and keeping the order row up to date during a run. |
-| `recipes/` | Reads recipes from Qdrant by id. |
+| `recipes/` | Reads recipes from Qdrant: by id, by search, and the list of ingredient names. |
 
 - **Tools:** `list_stores`, `search_products`, `compare_prices`, `plan_basket`, `add_to_cart`, `remove_from_cart`, `view_cart`, and `checkout` when a wallet is connected.
 - **The server sets the price and pack count.** The model only names a store, a UPC and the ingredient it is for.
@@ -338,7 +339,7 @@ From recipes to the buyer (`POST /api/shopping-runs`):
 - The server reads the ingredients itself. It saves a session, one option per recipe, the plan and its slots, calls `build_grocery_list`, and starts the run the same way the route above does.
 - **One pack of each ingredient.** The recipes' amounts have no units ("4" blueberries, "1/4" sugar), and over a quarter of the recipes have a different number of amounts than ingredient names, so the amounts are not used. Each ingredient is saved once on the grocery list with `quantity_estimate` 1, however many recipes use it. That is a set amount, not an unknown one, so auto mode doesn't hold it for a check.
 - Calling `build_grocery_list` again on such a plan clears the amounts. The items are then treated as unknown amounts and held.
-- **The recipes are not checked for allergens here.** They are stored as `allergen_safe`, which the slots table requires, so only send recipes that already passed the allergen check. That check is being built separately.
+- **The recipes are not checked for allergens here.** They are stored as `allergen_safe`, which the slots table requires, so only send recipes that already passed the allergen check: the ones `POST /api/meal-options` returned. See [Meal planner](#meal-planner).
 - The mock stores sell a small range. A real recipe usually has ingredients no store stocks; the summary lists them as not found.
 
 Following a run:
@@ -372,6 +373,7 @@ The API tests use stand-ins for Supabase, the stores, Stripe, Link and the model
 | What | Command | Real | Stand-ins |
 |---|---|---|---|
 | The routes against Supabase | `$env:RUN_SUPABASE_TESTS = "1"; uv run --package api pytest apps/api/tests/test_supabase_live.py` | Supabase | Stores' Stripe, Link, model |
+| The meal planner against Supabase | `$env:RUN_SUPABASE_TESTS = "1"; uv run --package api pytest apps/api/tests/test_meals_live.py` | Supabase | Qdrant, both models, Jev |
 | A run paid in the Stripe sandbox | `$env:RUN_STRIPE_SANDBOX_TEST = "1"; uv run --package api pytest apps/api/tests/test_sandbox_live.py -s` | Supabase, the stores' checkout, one sandbox payment of about $48 | Link (Stripe's test helper grants the token, so no phone approval), model |
 
 The sandbox test needs `STRIPE_SECRET_KEY` and `STRIPE_PROFILE_ID` in `.env`. It asks Stripe for the PaymentIntent the saved order points at and checks it succeeded for the same amount. With `-s` it prints the payment reference.
@@ -411,8 +413,92 @@ What has and hasn't run for real:
 $env:RUN_STRIPE_SANDBOX_TEST = "1"; uv run --package storefront pytest apps/storefront -k sandbox
 ```
 
+## Meal planner
+
+`POST /api/meal-options` chooses the meals for a signed-in user's plan and checks each one against the household's allergies and diet. It lives in `apps/api/src/api/meals`, with the allergen reference in `apps/api/src/api/allergens`.
+
+```
+for each meal type (breakfast, lunch, dinner):
+  query model ──► a few different dishes, each written like a recipe card
+  Titan       ──► one vector per dish
+  Qdrant      ──► nearest recipes behind the hard filter (allergens, diet, cooling, not-a-meal)
+  reranker    ──► best fit first (a stand-in keeps the search order for now)
+  safety      ──► reference files on the whole recipe, then Jev; 15 at a time until 10 pass
+```
+
+### The three allergen gates
+
+Putting "no peanuts" in a search text pulls peanut recipes closer, so nothing that must be left out is ever part of the search text. It is enforced three times instead:
+
+1. **The Qdrant filter.** The recipes use about 4,100 distinct ingredient names. The matcher reads each one once (`allergens/vocabulary.py`), and a household's filter is the list of names it rules out. That is why `vanilla yogurt` is blocked for milk and `coconut milk` is not, although Qdrant can only match a name exactly. The names are read from Qdrant again every 10 minutes.
+2. **The reference files on the whole recipe.** The raw ingredient names and the cooking steps, which the filter never sees. In the steps only words that name the allergen itself count ("butter"), since the weaker ones are mostly verbs and cookware ("roll", "glaze").
+3. **Jev.** One request per recipe, one yes/no question per allergen and per diet. It catches what a word list can't: brand names, and ingredients that only appear in the steps ("serve over angel hair pasta"). A recipe is dropped at a probability of `ALLERGEN_BLOCK_PROBABILITY` or more.
+
+Either of the last two can rule a recipe out. **A recipe Jev could not be asked about is left out, and with Jev down or `JEV_API` unset the route answers `503`.** Nothing unchecked is ever returned.
+
+What blocks:
+
+- **Every tier of the reference file except `broad_category`** ("sauce", "soup", "seasoning"). So `margarine` (check the label for milk) and `coconut` (related to tree nuts) are blocked. This is strict on purpose and leaves a milk-allergic household about a third of the main dishes.
+- **The 10 allergens of `public.allergens` map to the reference file's 14 groups in `allergens/profile.py`:** `shellfish` is crustaceans and molluscs, `wheat` is the gluten cereals limited to wheat, `gluten` is all of them.
+- **A custom allergen that names a group** (`mustard`, `celery`) uses that group. Any other is matched by name in the ingredients, also inside longer words (`corn` in `cornstarch`), and asked to Jev.
+- **`allergens/allergen_reference.json` is kept as supplied.** `allergen_extras.json` adds the ingredient names of the recipe data it did not know (`crabmeat`, `soymilk`, `cool whip`...). Add rows there, not to the reference file.
+
+### Diet styles
+
+Hard rules, enforced in the same three places. `meals/diet_reference.json` holds what a diet avoids that is not an allergen (meat, pork, poultry, gelatin, honey, alcohol).
+
+| Style | Left out |
+|---|---|
+| `vegetarian`, `vegan`, `pescatarian` | Meat, poultry and gelatin; fish and shellfish too unless pescatarian; dairy, eggs and honey too if vegan |
+| `dairy-free`, `gluten-free` | The milk and gluten cereal groups, at the tiers that mean "is" or "usually is" |
+| `low-carb` | Recipes with more than `LOW_CARB_MAX_SHARE` of their calories from carbohydrates |
+| `halal` | Pork and alcohol. The answer carries a warning: a recipe can't show how its meat was prepared. |
+| `kosher` | Pork, shellfish, and meat together with dairy. Same kind of warning. |
+
+Any other style (`keto`, `mediterranean`) is passed to the query model as a preference only. So are liked and disliked foods, cuisines, cooking time and the nutrition goals.
+
+### What a run reads and saves
+
+- **Reads** `my_allergies`, `preferences`, `nutrition_goals`, and every meal option the user was shown in the last `COOLING_DAYS` (any status but `queued`). Those recipes are left out of the search.
+- **Saves** a `meal_option_sessions` row with snapshots of what it read, and one `meal_options` row per checked recipe, with the evidence in `compliance`: the reference file's notes, Jev's probability per question, and the Jev model.
+- **Keeps 10 per meal type** (more for plans longer than 7 days). The best `plan_days` are saved as `shown` with a `day_index`; the rest are `queued` alternatives. A recipe is offered for one meal type only.
+- Meal types come from `preferences.meals_per_day`: 1 is dinner, 2 adds lunch, 3 adds breakfast, 4 adds a snack.
+
+### Routes
+
+| Route | What it does |
+|---|---|
+| `POST /api/meal-options` | Runs the planner. Optional body `{"plan_days": 5, "meal_types": ["lunch", "dinner"]}` replaces the saved plan length and meals for this run. Allergies can't be changed here. |
+| `GET /api/meal-options/{session_id}` | A saved set of options with the recipes' ingredients and steps. Someone else's answers `404`. |
+
+`POST` answers `201` with the options per meal type and a `warnings` list to show the user (a diet that can't be verified, a meal type that came up short, a fallback that was used). `422` means no recipe fits the household's rules, and `503` that Qdrant, the embedding model or Jev could not be reached. In both cases the session is saved as `failed` with the reason.
+
+### Settings
+
+| Variable | Default | Notes |
+|---|---|---|
+| `JEV_API` | none | TypeSafe API key. Required: without it the route answers `503`. |
+| `JEV_MODEL` | `jev-1.13.0` | Pinned, so a new model can't change what counts as safe unnoticed. |
+| `ALLERGEN_BLOCK_PROBABILITY` | `0.2` | Drop a recipe at this Jev probability or more. See the note in `settings.py` on how it was chosen. |
+| `DIET_BLOCK_PROBABILITY` | `0.4` | The same for diet questions. |
+| `LLM_PROVIDER`, `BEDROCK_MODEL_ID` | as for the agent | The query model. With `scripted`, fixed searches are used and the answer says so. |
+| `MEAL_QUERY_MODEL_ID` | none | A different Bedrock model for the queries only. |
+| `BEDROCK_EMBED_MODEL_ID`, `EMBED_DIMENSIONS` | Titan V2, `1024` | Must match `scripts/ingest_recipes.py`. |
+| `MEAL_IDEAS` | `4` | Dishes searched per meal type. See below. |
+| `MEAL_CANDIDATES`, `MEAL_CHECK_BATCH`, `MEAL_OPTIONS` | `50`, `15`, `10` | Recipes reranked, checked at a time, and kept, per meal type. |
+| `COOLING_DAYS` | `14` | |
+
+### Known limits
+
+- **A request takes 25 to 35 seconds, most of it waiting for embeddings.** Our Bedrock key allowed about 0.6 Titan calls a second on 2026-10-10, and a three-meal plan needs 12: 18 to 27 seconds. The query model takes about 3 seconds and the checks a few. The log line per meal type from `api.meals.pipeline` shows the split. Ask AWS for a higher Titan quota, then raise `MEAL_IDEAS` for more variety.
+- **No reranker yet.** `meals/rerank.py` has the interface and a stand-in that keeps the search order. Return the real one from `get_reranker` in `meals/router.py`. Until then side dishes and slow recipes can rank high.
+- **Jev's limit was set on a small sample:** 14 hidden-allergen recipes and 56 real ones. Check more before trusting it beyond a demo.
+- **`low-carb` filters on a field Qdrant has no index for.** It works (half a second on 10,800 recipes) and will slow down as more are loaded. `uv run scripts/ingest_recipes.py --limit 1` adds the index and embeds nothing. Without `--limit` the script embeds every recipe not loaded yet.
+- The web app still calls `POST /api/meal-plan`, which doesn't exist. It needs sign-in before it can call these routes.
+
 ## Not built yet
 
-- **Web UI for the buying agent.** The routes above have no screen yet: starting a run, the live progress, the cart and the orders. Sign-in in the web app is not built either.
+- **Web UI for the buying agent and the meal planner.** The routes above have no screen yet: planning meals, starting a run, the live progress, the cart and the orders. Sign-in in the web app is not built either.
+- **More alternatives and replacing a meal** (`/more`, `/replace`). The queued options are saved for them, but no route hands them out yet.
 - **Paying for a saved cart without a new run.** The agent pays at the end of its own run. Items a store couldn't sell stay in the cart until the next run, which starts over for whatever is still unbought.
 - **CRUD endpoints** for the other tables (preferences, allergies, plans and the rest). Besides the routes above, only `/api/health` exists.
