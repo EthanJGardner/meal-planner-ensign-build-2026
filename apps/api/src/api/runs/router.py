@@ -1,6 +1,6 @@
 """HTTP routes for the buying agent: start a run for a grocery list or for chosen
-recipes and follow it live, look at the cart it filled, and read the orders it
-placed."""
+recipes and follow it live, look at the cart it filled, read the orders it
+placed, and keep the user's choice to have it buy without being asked."""
 
 import asyncio
 import json
@@ -90,6 +90,14 @@ OwnList = Annotated[GroceryList, Depends(_own_list)]
 class StartRun(BaseModel):
     # Leave out to use the mode saved in the user's preferences.
     mode: Mode | None = None
+    # The user also chose "buy it for me every time": turns auto_buy on. False
+    # leaves the saved choice as it is, so a run never turns it off.
+    remember: bool = False
+
+
+class AutoBuy(BaseModel):
+    # True: the web app starts the agent without asking first.
+    auto_buy: bool
 
 
 class ChosenMeal(BaseModel):
@@ -140,7 +148,7 @@ async def _stream(
         yield _sse(event.type, event.model_dump_json())
 
 
-RunStarter = Callable[[GroceryList, Mode | None], Awaitable[StreamingResponse]]
+RunStarter = Callable[[GroceryList, StartRun], Awaitable[StreamingResponse]]
 
 
 def get_run_starter(
@@ -153,15 +161,19 @@ def get_run_starter(
 ) -> RunStarter:
     """The one way a run is started, for every route that starts one."""
 
-    async def start(grocery: GroceryList, mode: Mode | None) -> StreamingResponse:
+    async def start(grocery: GroceryList, options: StartRun) -> StreamingResponse:
         items, item_ids = shopping_items(grocery.items, await data.bought_item_ids(grocery.id))
         if not items:
             raise HTTPException(status.HTTP_409_CONFLICT, "Nothing on this list is left to buy")
         shopping = ShoppingRequest(
             items=items,
-            mode=mode or await data.shopping_mode(),
+            mode=options.mode or await data.shopping_mode(),
             budget_cents=grocery.budget_cents,
         )
+        if options.remember:
+            # Saved when the user confirms, not when the run succeeds: the choice
+            # stands whatever happens to this run.
+            await data.set_auto_buy(True)
         try:
             order_id = await data.start_run(
                 grocery,
@@ -227,7 +239,7 @@ async def start_run(
     """Starts the buying agent on what is left to buy on the list, and streams
     its events as server-sent events. The run carries on if the client goes
     away; its result is on the order named in the first event."""
-    return await start(grocery, body.mode if body else None)
+    return await start(grocery, body or StartRun())
 
 
 @router.post("/shopping-runs", response_class=StreamingResponse, responses=_EVENT_STREAM)
@@ -270,7 +282,7 @@ async def shop_for_recipes(
     list_id = await data.save_plan(
         meals, household_size=body.household_size, budget_cents=body.budget_cents
     )
-    return await start(await _own_list(UUID(list_id), data), body.mode)
+    return await start(await _own_list(UUID(list_id), data), body)
 
 
 async def _view(grocery: GroceryList, data: ShoppingData, storefront: StorefrontClient) -> CartView:
@@ -319,6 +331,19 @@ async def remove_cart_item(grocery: OwnList, store: str, upc: str, data: Data) -
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
     if not removed:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "That item is not in the cart")
+
+
+@router.get("/auto-buy")
+async def get_auto_buy(data: Data) -> AutoBuy:
+    """Whether to start the buying agent without asking the user first. Off
+    until the user turns it on, here or with "remember" when starting a run."""
+    return AutoBuy(auto_buy=await data.auto_buy())
+
+
+@router.put("/auto-buy")
+async def set_auto_buy(body: AutoBuy, data: Data) -> AutoBuy:
+    await data.set_auto_buy(body.auto_buy)
+    return body
 
 
 @router.get("/orders")

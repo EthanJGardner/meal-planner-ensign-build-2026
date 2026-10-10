@@ -95,6 +95,12 @@ class ShoppingData(Protocol):
 
     async def shopping_mode(self) -> Mode: ...
 
+    async def auto_buy(self) -> bool:
+        """Whether the user asked to have the agent buy without being asked each time."""
+        ...
+
+    async def set_auto_buy(self, on: bool) -> None: ...
+
     async def bought_item_ids(self, list_id: str) -> set[str]:
         """Grocery items of this list that an earlier run already paid for."""
         ...
@@ -240,6 +246,18 @@ class SupabaseShoppingData:
     async def shopping_mode(self) -> Mode:
         res = await self._user_db.table("preferences").select("shopping_mode").execute()
         return res.data[0]["shopping_mode"] if res.data else "manual"
+
+    async def auto_buy(self) -> bool:
+        res = await self._user_db.table("preferences").select("auto_buy").execute()
+        return res.data[0]["auto_buy"] if res.data else False
+
+    async def set_auto_buy(self, on: bool) -> None:
+        # A new user has no preferences row yet. An existing row keeps everything else.
+        await (
+            self._user_db.table("preferences")
+            .upsert({"user_id": self._user_id, "auto_buy": on}, on_conflict="user_id")
+            .execute()
+        )
 
     async def bought_item_ids(self, list_id: str) -> set[str]:
         res = await (

@@ -35,6 +35,7 @@ USER = "33333333-3333-4333-8333-333333333333"
 RUNS = f"/api/grocery-lists/{LIST_ID}/shopping-runs"
 RECIPE_RUNS = "/api/shopping-runs"
 CART = f"/api/grocery-lists/{LIST_ID}/cart"
+AUTO_BUY = "/api/auto-buy"
 
 
 def token(secret=SECRET, **claims):
@@ -178,13 +179,21 @@ async def test_an_assumed_amount_is_held_for_the_users_check_even_in_auto_mode()
     ids=["missing", "garbage", "anon key", "expired", "wrong secret"],
 )
 async def test_every_route_needs_a_signed_in_user(api, data, authorization):
-    routes = [("GET", "/api/orders"), ("GET", CART), ("POST", RUNS), ("POST", RECIPE_RUNS)]
+    routes = [
+        ("GET", "/api/orders"),
+        ("GET", CART),
+        ("POST", RUNS),
+        ("POST", RECIPE_RUNS),
+        ("GET", AUTO_BUY),
+        ("PUT", AUTO_BUY),
+    ]
     for method, path in routes:
+        body = {"meals": MEALS, "remember": True, "auto_buy": True}
         response = await api.request(
-            method, path, headers={"Authorization": authorization}, json={"meals": MEALS}
+            method, path, headers={"Authorization": authorization}, json=body
         )
         assert response.status_code == 401, (method, path)
-    assert (data.rows, data.plans) == ({}, [])
+    assert (data.rows, data.plans, data.auto_buy_on) == ({}, [], False)
 
 
 async def test_a_users_own_token_is_accepted(api):
@@ -254,6 +263,67 @@ async def test_an_empty_cart_is_read_without_asking_the_stores(api, app):
     )
     cart = (await api.get(CART)).json()
     assert (cart["items"], cart["in_cart"]["total_cents"]) == ([], 0)
+
+
+# --- buying without being asked each time ---------------------------------------
+
+
+async def test_auto_buy_is_off_until_the_user_turns_it_on(api):
+    assert (await api.get(AUTO_BUY)).json() == {"auto_buy": False}
+
+    assert (await api.put(AUTO_BUY, json={"auto_buy": True})).json() == {"auto_buy": True}
+    assert (await api.get(AUTO_BUY)).json() == {"auto_buy": True}
+
+    await api.put(AUTO_BUY, json={"auto_buy": False})
+    assert (await api.get(AUTO_BUY)).json() == {"auto_buy": False}
+    assert (await api.put(AUTO_BUY, json={})).status_code == 422
+
+
+async def test_a_run_started_with_remember_turns_auto_buy_on(api, data):
+    events = events_of(await api.post(RUNS, json={"remember": True}))
+
+    assert events[-1]["type"] == "done"
+    assert data.auto_buy_on
+
+
+async def test_a_run_without_remember_leaves_the_saved_choice_alone(api, data):
+    await api.post(RUNS)
+    assert not data.auto_buy_on
+
+    # The app starts later runs without the dialog, so without the field.
+    data.auto_buy_on = True
+    await api.post(RUNS, json={"mode": "auto", "remember": False})
+    assert data.auto_buy_on
+
+
+async def test_the_choice_is_kept_when_the_run_breaks(api, app, data):
+    class Broken:
+        async def complete(self, system, messages, tools):
+            raise RuntimeError("boom")
+
+    app.dependency_overrides[runs.get_model] = Broken
+
+    events = events_of(await api.post(RUNS, json={"remember": True}))
+
+    assert events[-1]["type"] == "error"
+    assert data.auto_buy_on
+
+
+async def test_a_run_that_is_refused_saves_no_choice(api, data):
+    data.grocery.items = []
+    assert (await api.post(RUNS, json={"remember": True})).status_code == 409
+
+    unknown = [{"recipe_id": 7, "day_index": 0, "meal_type": "dinner"}]
+    refused = await api.post(RECIPE_RUNS, json={"meals": unknown, "remember": True})
+    assert refused.status_code == 404
+    assert not data.auto_buy_on
+
+
+async def test_a_recipe_run_can_remember_the_choice_too(api, data):
+    events = events_of(await api.post(RECIPE_RUNS, json={"meals": MEALS, "remember": True}))
+
+    assert events[-1]["type"] == "done"
+    assert data.auto_buy_on
 
 
 # --- a run for chosen recipes ---------------------------------------------------

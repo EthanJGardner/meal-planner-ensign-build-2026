@@ -65,6 +65,7 @@ class FakeShoppingData:
             id=LIST_ID, plan_id=PLAN_ID, budget_cents=budget_cents, items=items
         )
         self.mode = mode
+        self.auto_buy_on = False
         self.cart_store = InMemoryCartStore()
         self.rows: dict[str, dict[str, Any]] = {}  # orders by id
         self.plans: list[list] = []  # the meals of each saved plan
@@ -91,6 +92,12 @@ class FakeShoppingData:
 
     async def shopping_mode(self):
         return self.mode
+
+    async def auto_buy(self):
+        return self.auto_buy_on
+
+    async def set_auto_buy(self, on):
+        self.auto_buy_on = on
 
     async def bought_item_ids(self, list_id):
         return {

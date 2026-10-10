@@ -126,7 +126,7 @@ The app tables are defined in [supabase/schema.sql](../supabase/schema.sql) (the
 | `user_allergens` | A user's allergens picked from the common list. **Add-only.** |
 | `user_custom_allergens` | A user's other allergens, as short cleaned terms. **Add-only.** |
 | `my_allergies` (view) | Both kinds in one list, for the UI and for FastAPI |
-| `preferences` | Diet styles, likes/dislikes, household size, budget, plan length, and the shopping mode (`manual` or `auto`). One row per user. |
+| `preferences` | Diet styles, likes/dislikes, household size, budget, plan length, the shopping mode (`manual` or `auto`), and `auto_buy`: start the buying agent without asking first. One row per user. |
 | `nutrition_goals` | Daily macro targets plus optional body stats for the calculator (one row per user) |
 | `meal_option_sessions` | One generation run, with snapshots of the allergies, preferences and goals it used |
 | `meal_options` | Candidate recipes produced by a session, with compliance results and status. The meal planner also sets which meal type each is for, and the day of the plan for the ones it shows. |
@@ -306,13 +306,26 @@ All of these need `Authorization: Bearer <access token>`. Someone else's list or
 
 | Route | What it does |
 |---|---|
-| `POST /api/grocery-lists/{list_id}/shopping-runs` | Starts the agent on the list and streams its events. Body: `{"mode": "manual"}` or `{"mode": "auto"}`; leave it out to use `preferences.shopping_mode`. |
+| `POST /api/grocery-lists/{list_id}/shopping-runs` | Starts the agent on the list and streams its events. Body: `{"mode": "manual"}` or `{"mode": "auto"}`; leave it out to use `preferences.shopping_mode`. Add `"remember": true` to also turn `auto_buy` on. |
 | `POST /api/shopping-runs` | Takes chosen recipes, saves them as a plan with its grocery list, and starts the agent on it in the same call. See below. |
 | `GET /api/grocery-lists/{list_id}/cart` | The cart with totals per store, delivery fees included |
 | `POST /api/grocery-lists/{list_id}/cart/approve` | Moves every proposed item into the cart |
 | `DELETE /api/grocery-lists/{list_id}/cart/items/{store}/{upc}` | Removes one item |
+| `GET /api/auto-buy` | `{"auto_buy": false}`: whether to start the agent without asking the user first |
+| `PUT /api/auto-buy` | Turns it on or off. Body and answer: `{"auto_buy": true}` |
 | `GET /api/orders` | The user's runs, newest first |
 | `GET /api/orders/{order_id}` | One run with the lines it bought and its final summary |
+
+The "buy it for me" button:
+
+1. On load, read `GET /api/auto-buy`. If it is `true`, skip the dialog and go to step 3 without `remember`.
+2. Otherwise ask "Do you want us to buy this for you?". On no, call nothing. On yes, ask "Do this every time?".
+3. Start the run with one of the two `POST` routes. Send `"remember": true` if the user said every time.
+
+- `remember` only ever turns the setting on. Leaving it out or sending `false` keeps what is saved, so a run can't turn it off. `PUT /api/auto-buy` turns it off.
+- It is saved when the user confirms, just before the run opens, and stays saved if the run then fails or pays nothing. A request refused before that (`404`, `422`, or `409` because nothing is left to buy) saves nothing. A `409` because a run is already going comes after the save, so the choice is kept.
+- The server only stores the choice. It never starts a run by itself: every run comes from a request by the browser.
+- `auto_buy` is not `shopping_mode`. `auto_buy` skips the question before a run. `shopping_mode` decides whether the agent's picks wait for approval inside a run.
 
 What a run shops for:
 
@@ -498,7 +511,7 @@ Any other style (`keto`, `mediterranean`) is passed to the query model as a pref
 
 ## Not built yet
 
-- **Web UI for the buying agent and the meal planner.** The routes above have no screen yet: planning meals, starting a run, the live progress, the cart and the orders. Sign-in in the web app is not built either.
+- **Web UI for the buying agent and the meal planner.** The routes above have no screen yet: planning meals, the "buy it for me" button and its dialog, the live progress, the cart and the orders. Sign-in in the web app is not built either.
 - **More alternatives and replacing a meal** (`/more`, `/replace`). The queued options are saved for them, but no route hands them out yet.
 - **Paying for a saved cart without a new run.** The agent pays at the end of its own run. Items a store couldn't sell stay in the cart until the next run, which starts over for whatever is still unbought.
 - **CRUD endpoints** for the other tables (preferences, allergies, plans and the rest). Besides the routes above, only `/api/health` exists.

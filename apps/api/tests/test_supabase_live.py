@@ -170,6 +170,43 @@ async def test_the_cart_is_stored_per_list_and_only_the_server_can_write_it(
     assert (await account.db.table("cart_items").select("id").execute()).data == []
 
 
+async def test_auto_buy_is_stored_in_the_users_own_preferences(api, sign_up, service):
+    account, stranger = await sign_up(), await sign_up()
+    await account.plan_groceries(ingredients(SAMPLE))
+    api.app.dependency_overrides[runs.get_wallet] = lambda: None  # stop at the cart
+    # A user who already has preferences keeps them.
+    await stranger.db.table("preferences").insert(
+        {"user_id": stranger.id, "liked_foods": ["rice"], "shopping_mode": "auto"}
+    ).execute()
+
+    # A new user has no preferences row yet.
+    assert (await api.get("/api/auto-buy", headers=as_user(account))).json() == {"auto_buy": False}
+
+    started = await api.post(account.runs, json={"remember": True}, headers=as_user(account))
+    events = events_of(started)
+
+    assert events[-1]["type"] == "done", events[-1]
+    assert (await api.get("/api/auto-buy", headers=as_user(account))).json() == {"auto_buy": True}
+    assert (await api.get("/api/auto-buy", headers=as_user(stranger))).json() == {"auto_buy": False}
+
+    for user in (account, stranger):
+        turned_on = await api.put("/api/auto-buy", json={"auto_buy": True}, headers=as_user(user))
+        assert turned_on.json() == {"auto_buy": True}
+    off = await api.put("/api/auto-buy", json={"auto_buy": False}, headers=as_user(account))
+    assert off.json() == {"auto_buy": False}
+
+    rows = await service.table("preferences").select("*").in_(
+        "user_id", [account.id, stranger.id]
+    ).execute()
+    saved = {row["user_id"]: row for row in rows.data}
+    assert (saved[account.id]["auto_buy"], saved[account.id]["shopping_mode"]) == (False, "manual")
+    assert saved[stranger.id]["auto_buy"]
+    assert (saved[stranger.id]["liked_foods"], saved[stranger.id]["shopping_mode"]) == (
+        ["rice"],
+        "auto",
+    )
+
+
 async def test_one_run_at_a_time_and_a_dead_run_does_not_block_forever(api, sign_up, service):
     account = await sign_up()
     await account.plan_groceries(ingredients(SAMPLE[:2]))
