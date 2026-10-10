@@ -17,7 +17,13 @@ The product should provide more value than a generic recipe generator by turning
 
 ### 1.2 Mission and value proposition
 
-FeedMe helps households create affordable, personalized meal plans that fit allergies, preferences, and goals while reducing grocery waste and planning effort. The product offers a practical, household-friendly meal-planning workflow designed to feel polished and usable in a demo environment.
+FeedMe's mission is to make sure everyone in a household can eat safely and enjoy their food, whatever their allergies, diet, or budget.
+
+For busy adults and families, FeedMe provides ease and healthy living by making weekly, custom meal plans and buying the ingredients for them.
+
+- **Health and ease**: To help busy people and families eat well every day, without the stress of planning.
+- **Safe for everyone at the table**: To make sure everyone in a household can eat safely and enjoy their food, whatever their allergies, diet, or budget.
+- **Time back**: To give busy families their time back by turning healthy eating into a plan that's done for you.
 
 ### 1.3 Hackathon priority
 
@@ -58,6 +64,7 @@ The MVP should include:
 - Basic preference persistence
 - Recipe details and ingredient quantities
 - A grocery list
+- Checkout and payment for the grocery list via Stripe
 - A simple, usable demo interface
 
 The MVP should prioritize one clear meal-planning flow over a large number of secondary sections.
@@ -72,7 +79,7 @@ The following features may be added only if the MVP is complete:
 - Social proof and recommendation ranking based on likes or purchases
 - Store price comparisons
 - Store locations or map pins
-- Subscriptions and monetization
+- Subscriptions
 - Cross-device persistence
 - Interfaces for mobile or Alexa
 
@@ -149,7 +156,9 @@ The final navigation and visual design should remain simple enough for the hacka
 - The system should aggregate ingredients from the selected meals into a grocery list.
 - The grocery list should account for required quantities and household servings.
 - Cost estimates may be shown per ingredient or for the overall plan.
-- Store purchasing, price comparison, and location pins are outside the core MVP.
+- The MVP shall support checkout and payment for the grocery list using Stripe.
+- Payment handling must use Stripe-hosted checkout or Stripe Elements so that card data never touches the backend directly.
+- Store price comparison and location pins are outside the core MVP.
 
 ### 5.6 Data persistence and accounts
 
@@ -178,6 +187,7 @@ Nutrition accuracy and allergy-safe substitutions are high-priority risks becaus
 - Backend: FastAPI
 - Persistence for MVP: browser local storage
 - AI generation: Claude via API
+- Payments: Stripe
 - Demo deployment: team member laptop with secrets stored in a local .env file
 
 FastAPI is preferred because meal-planning logic may later be reused by mobile or Alexa interfaces. Mixing React, Streamlit, Svelte, and Blazor is out of scope; Streamlit is only a fallback if a simpler prototype is required.
@@ -206,8 +216,9 @@ The MVP is ready for demonstration when a test user can:
 3. Identify the recommended meal and available alternatives.
 4. Reject or replace at least one meal.
 5. Save or select meals and view the resulting grocery list.
-6. Refresh the browser and retain the relevant preferences and selections.
-7. Understand that nutrition and allergy information requires verification.
+6. Check out and pay for the grocery list via Stripe.
+7. Refresh the browser and retain the relevant preferences and selections.
+8. Understand that nutrition and allergy information requires verification.
 
 The team should test the flow against the existing user personas, including cases involving allergies, budget constraints, household size, and meal regeneration.
 
