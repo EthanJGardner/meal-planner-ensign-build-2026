@@ -17,7 +17,7 @@ The product should provide more value than a generic recipe generator by turning
 
 ### 1.2 Mission and value proposition
 
-FeedMe helps households create affordable, personalized meal plans that fit allergies, preferences, and goals while reducing grocery waste and planning effort. The product offers a practical, household-friendly meal-planning workflow designed to feel polished and usable in a demo environment.
+The product should make meal planning easier, more affordable, and more suitable for each household. The final mission statement, vision, and value proposition still need to be written and should be completed before the presentation.
 
 ### 1.3 Hackathon priority
 
@@ -51,7 +51,7 @@ The MVP should include:
 - A preference and household setup form
 - Allergy and dietary-restriction capture
 - Household serving-size support
-- Personalized meal-plan generation for breakfast, lunch, and dinner
+- Personalized meal-plan generation
 - A best-fit meal recommendation with alternatives
 - Meal acceptance, rejection, saving, and replacement
 - Editable preferences and plan regeneration
@@ -113,7 +113,7 @@ The final navigation and visual design should remain simple enough for the hacka
 
 - The system shall collect household size.
 - The system shall plan each meal for the household's number of servings.
-- The system shall collect food preferences, dietary restrictions, nutrition goals, budget, cooking-time preferences, and a configurable planning period.
+- The system shall collect food preferences, dietary restrictions, nutrition goals, budget, cooking-time preferences, and planning period.
 - The system shall allow users to edit these values after initial setup.
 - Location should be obtained from the incoming request rather than entered manually, if location is needed.
 
@@ -128,21 +128,18 @@ The final navigation and visual design should remain simple enough for the hacka
 
 ### 5.3 Meal-plan generation
 
-- The system shall generate a plan using the user's preferences, household size, restrictions, goals, budget, cooking-time constraints, and a configurable planning period.
-- The MVP shall generate breakfast, lunch, and dinner meals for the household plan.
+- The system shall generate a plan using the user's preferences, household size, restrictions, goals, budget, cooking-time constraints, and planning period.
 - Generated meals should include at least a name, meal type, servings, ingredients, quantities, preparation instructions, and estimated cooking time.
 - The plan should expose nutrition and cost estimates when those values are available.
 - The system shall return alternatives when a user rejects a meal.
 
 ### 5.4 Feedback and meal replacement
 
-- Users shall be able to accept or reject a meal; accepting a meal confirms it for the plan.
+- Users shall be able to accept or reject a meal.
 - Users shall be able to save or heart a meal.
 - Users shall be able to request an alternative.
 - The product should support replacing an individual meal without requiring the entire plan to be regenerated, if technically feasible for the MVP.
-- The MVP should support both single-meal regeneration and whole-plan regeneration.
-- Feedback should be available for future ranking, including most-liked or most-purchased meals, and may include accept, reject, or custom feedback.
-- Social proof and ranking are intentionally out of scope for the demo.
+- Feedback should be available for future ranking, including most-liked or most-purchased meals.
 
 ### 5.5 Grocery workflow
 
@@ -154,19 +151,17 @@ The final navigation and visual design should remain simple enough for the hacka
 ### 5.6 Data persistence and accounts
 
 - The MVP should persist preferences and selected meals across a browser refresh.
-- Browser local storage is the required MVP persistence approach; no account creation is planned.
+- Browser local storage is the preferred MVP persistence approach.
 - Account creation and Firebase-based cross-device persistence remain future options unless the team decides otherwise.
 - If accounts are implemented, users must be able to delete their account and associated data.
-- User-submitted data sent to the AI provider should be limited to preferences and dietary restrictions, and should be discarded after the plan is finalized for the demo.
 
 ## 6. Nutrition and Cost Requirements
 
 - Nutrition values must be labeled as estimates unless they come from a verified data source.
 - Serving sizes must be reflected in nutrition and cost calculations.
 - The system should identify the source or calculation method for nutrition values.
-- Budget is a hard MVP constraint for meal selection, not just an estimate shown to users.
+- Budget behavior must be defined before budget is treated as a hard planning constraint.
 - The system should explain when a plan cannot satisfy all requested constraints.
-- Nutrition and cost estimates should rely on macro values and should be treated as approximate rather than medical or exact commercial data.
 
 Nutrition accuracy and allergy-safe substitutions are high-priority risks because incorrect output could affect user safety.
 
@@ -177,19 +172,17 @@ Nutrition accuracy and allergy-safe substitutions are high-priority risks becaus
 - Frontend: React with TypeScript
 - Backend: FastAPI
 - Persistence for MVP: browser local storage
-- AI generation: Claude via API
-- Demo deployment: team member laptop with secrets stored in a local .env file
+- AI generation: provider and model to be selected
 
 FastAPI is preferred because meal-planning logic may later be reused by mobile or Alexa interfaces. Mixing React, Streamlit, Svelte, and Blazor is out of scope; Streamlit is only a fallback if a simpler prototype is required.
 
 ### 7.2 AI integration
 
-- AI output should use a strict structured JSON schema rather than unvalidated free-form text.
+- AI output should use a strict structured schema rather than unvalidated free-form text.
 - The backend should validate generated meals before returning them to the frontend.
 - Invalid, incomplete, unsafe, or unavailable AI responses must produce an explicit user-facing error.
 - API keys and other secrets must remain server-side and must not be committed to the repository.
 - The application should have a demo fallback or sample data path if the AI service is unavailable.
-- Meal-generation safety checks should gate ingredient substitutions against allergy constraints and the system should not suggest unsafe substitutions.
 
 ### 7.3 Accessibility and compatibility
 
@@ -222,3 +215,57 @@ The team should test the flow against the existing user personas, including case
 7. Test the core personas and safety-related edge cases.
 8. Polish the UI and prepare the demo.
 9. Add optional features only after the success criteria are met.
+
+## 10. Open Questions and Decisions Needed
+
+### Product scope
+
+1. Is budget a hard MVP constraint, an estimate shown to users, or a post-MVP feature?
+2. Is grocery-list generation required for the MVP or only recommended?
+3. What is the exact planning period for the demo: one day, one week, or a configurable range?
+4. Which meal types are required: breakfast, lunch, dinner, snacks, or all four?
+5. Are users selecting meals individually, accepting a complete plan, or both?
+6. Should users be able to lock selected meals while regenerating the rest?
+7. Is fridge-based suggestion functionality excluded from the demo?
+8. What features are explicitly out of scope under the hackathon timeframe?
+
+### Feedback and recommendations
+
+9. What does “accept” a meal do: save it, add it to the grocery list, or confirm it for the plan?
+10. Should the MVP support single-meal regeneration, whole-plan regeneration, or both?
+11. Should feedback be limited to accept/reject/save, or should users provide free-form feedback?
+12. Should social proof and ranking be excluded until real usage data exists?
+
+### Nutrition, allergies, and safety
+
+13. Which nutrition database or calculation source will be used?
+14. Which nutrition fields are required, and how will values be validated?
+15. How will ingredient substitutions be checked against allergies?
+16. How should the system respond when no meal satisfies all restrictions?
+17. Which disclaimers and safety warnings are required?
+18. Are allergies, intolerances, and dietary preferences represented as separate input types?
+
+### Accounts and data
+
+19. Is the demo local-storage-only, or will account creation be implemented?
+20. If accounts are implemented, what authentication provider will be used?
+21. What data is sent to the AI provider, and how long is it retained?
+22. What exactly must account deletion remove?
+23. If local storage is used, is losing data when browser storage is cleared acceptable?
+
+### AI and technical delivery
+
+24. Which AI model and API will power generation?
+25. What structured response schema will the model return?
+26. What is the fallback behavior when the AI service fails or returns invalid data?
+27. Where will the demo be hosted, and how will secrets be configured?
+28. Is React + FastAPI confirmed, or is a Streamlit prototype preferred?
+
+### Business, branding, and presentation
+
+29. What are the product name, brand, and color palette?
+30. What are the final mission statement, vision, and value proposition?
+31. What do the hackathon rules require regarding business viability, marketing, or monetization?
+32. Is subscription functionality out of scope? If not, should users be able to cancel?
+33. What does “pin info” mean: store locations, map pins, or something else?
+34. Are store price comparisons and location data required for the final presentation?
