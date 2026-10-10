@@ -81,12 +81,13 @@ When a user registers, a trigger creates their `profiles` row automatically.
 
 ## Writing API routes
 
-[db.py](../apps/api/src/api/db.py) provides two Supabase clients as FastAPI dependencies:
+[db.py](../apps/api/src/api/db.py) provides three Supabase clients as FastAPI dependencies:
 
 | Dependency | Acts as | Use for |
 |---|---|---|
 | `UserDB` | The logged-in user (RLS enforced) | **Everything a user triggers.** This is the default. |
 | `ServiceDB` | `service_role` (RLS bypassed) | System work only: seeding, background agent jobs, admin actions. |
+| `AnonDB` | Nobody (`anon`, RLS enforced) | The few tables a guest may read. Today that is the common allergen list. |
 | `CurrentUser` | n/a | The verified user: `.id`, `.email`, `.token` |
 
 ```python
@@ -386,6 +387,7 @@ The API tests use stand-ins for Supabase, the stores, Stripe, Link and the model
 | What | Command | Real | Stand-ins |
 |---|---|---|---|
 | The routes against Supabase | `$env:RUN_SUPABASE_TESTS = "1"; uv run --package api pytest apps/api/tests/test_supabase_live.py` | Supabase | Stores' Stripe, Link, model |
+| The household routes against Supabase | `$env:RUN_SUPABASE_TESTS = "1"; uv run --package api pytest apps/api/tests/test_household_live.py` | Supabase | Nothing else is called |
 | The meal planner against Supabase | `$env:RUN_SUPABASE_TESTS = "1"; uv run --package api pytest apps/api/tests/test_meals_live.py` | Supabase | Qdrant, both models, Jev |
 | A run paid in the Stripe sandbox | `$env:RUN_STRIPE_SANDBOX_TEST = "1"; uv run --package api pytest apps/api/tests/test_sandbox_live.py -s` | Supabase, the stores' checkout, one sandbox payment of about $48 | Link (Stripe's test helper grants the token, so no phone approval), model |
 
@@ -425,6 +427,45 @@ What has and hasn't run for real:
 ```powershell
 $env:RUN_STRIPE_SANDBOX_TEST = "1"; uv run --package storefront pytest apps/storefront -k sandbox
 ```
+
+## Household: preferences, allergies and nutrition goals
+
+What a household saves about itself, in `apps/api/src/api/household`. The [meal planner](#meal-planner) reads all three on its next run.
+
+| Route | What it does |
+|---|---|
+| `GET /api/preferences` | The saved preferences, or `null` if the user never saved any |
+| `PUT /api/preferences` | Replaces them and answers with what was stored |
+| `GET /api/allergens` | The common allergens to choose from: `[{"id": "milk", "label": "Milk / dairy"}, …]`. **Needs no sign-in**, so the form can show them to a guest. |
+| `GET /api/allergies` | The user's allergies: `[{"allergen", "label", "kind": "common" or "custom"}]`, oldest first |
+| `POST /api/allergies` | Adds one. Body `{"allergen_id": "milk"}` or `{"name": "strawberries"}`. Answers `201` with the whole list. |
+| `GET /api/nutrition-goals` | The daily targets, or `null` |
+| `PUT /api/nutrition-goals` | Replaces them. Body and answer: `{"calories", "protein_g", "carbs_g", "fat_g"}` |
+
+All but `GET /api/allergens` need `Authorization: Bearer <access token>`.
+
+```json
+{
+  "diet_styles": ["vegetarian"],
+  "liked_foods": ["rice", "tofu"],
+  "disliked_foods": [],
+  "liked_cuisines": [],
+  "disliked_cuisines": ["fast food"],
+  "household_size": 4,
+  "weekly_budget": 120.5,
+  "max_cook_time_minutes": 30,
+  "plan_days": 5,
+  "meals_per_day": 2
+}
+```
+
+- **A refusal answers `422` with a sentence in `detail`** that can be shown to the user as it is, such as `Liked foods: "x" is too short.` or `Calories must be at least 1200.` The number ranges are checked in `household/schemas.py` with the same limits as the tables. The rules for the lists and for typed allergens live in the database only, and its message is passed on.
+- **The lists come back cleaned:** lowercased, trimmed, sorted and without duplicates. Show what the answer holds, not what was sent.
+- **`PUT` replaces every field it knows.** A field left out goes back to its default, so send the whole object. `shopping_mode` and `auto_buy` are not part of it and keep their values.
+- **`GET /api/preferences` is `null` only until the row exists.** `PUT /api/auto-buy` creates the row too, and from then on the answer is the table's defaults (household of 1, 7 days, 3 meals).
+- **Allergies are add-only**, as in the database: there is no route to change or remove one. Adding one the user already has changes nothing and still answers `201`.
+- **A typed name the common list knows is stored as the common allergen:** `{"name": "Dairy"}` adds `milk`. Read the list in the answer rather than assuming what was added. An `allergen_id` that isn't on the list answers `404`.
+- **Nutrition goals cover the four targets only.** The table's optional columns (fiber, sodium, body stats) are neither read nor changed. Calories must be at least 1200, and protein, carbs and fat (4/4/9 kcal per gram) must add up to within 10% of them.
 
 ## Meal planner
 
@@ -514,4 +555,4 @@ Any other style (`keto`, `mediterranean`) is passed to the query model as a pref
 - **Web UI for the buying agent and the meal planner.** The routes above have no screen yet: planning meals, the "buy it for me" button and its dialog, the live progress, the cart and the orders. Sign-in in the web app is not built either.
 - **More alternatives and replacing a meal** (`/more`, `/replace`). The queued options are saved for them, but no route hands them out yet.
 - **Paying for a saved cart without a new run.** The agent pays at the end of its own run. Items a store couldn't sell stay in the cart until the next run, which starts over for whatever is still unbought.
-- **CRUD endpoints** for the other tables (preferences, allergies, plans and the rest). Besides the routes above, only `/api/health` exists.
+- **CRUD endpoints** for the other tables (profiles, plans, favorites, feedback, grocery lists). Besides the routes above, only `/api/health` exists.
