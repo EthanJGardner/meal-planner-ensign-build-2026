@@ -77,14 +77,16 @@ These features round out the core flow and should ship if time allows after Esse
 - Budget setting
 - Save preferences (basic preference persistence)
 - Checkout and payment for the grocery list via Stripe
+- User accounts (sign-up/login), so preferences, recipes, and meal plans persist to an account rather than only local storage
 
 ### 3.3 Optional
 
 - Custom recipes with ingredient swaps
 - Preferred grocery stores
 - Fridge-based meal suggestions
+- Saving favorite recipes and meal plans to an account
 - User-published meal plans
-- Browse weekly plans from other users
+- Browse and save weekly plans published by other users
 - Be able to add a meal plan to your calendar
 
 ### 3.4 Later
@@ -97,10 +99,9 @@ These features round out the core flow and should ship if time allows after Esse
 The following are not part of the priority tiers above and would only be considered well beyond MVP:
 
 - Separate meals for picky eaters or individual household members
-- Favorites, repurchase history, purchase history, receipts, and templates
+- Repurchase history, purchase history, receipts, and templates
 - Social proof and recommendation ranking based on likes or purchases
 - Store price comparisons and store locations or map pins
-- Cross-device persistence
 - Mobile interfaces
 
 Separate meals for individual household members are specifically deferred because they substantially increase planning and safety complexity.
@@ -186,10 +187,11 @@ The final navigation and visual design should remain simple enough for the hacka
 
 ### 5.6 Data persistence and accounts
 
-- The MVP should persist preferences and selected meals across a browser refresh.
-- Browser local storage is the required MVP persistence approach; no account creation is planned.
-- Account creation and Firebase-based cross-device persistence remain future options unless the team decides otherwise.
-- If accounts are implemented, users must be able to delete their account and associated data.
+- The MVP should persist preferences and selected meals across a browser refresh, via local storage, independent of login.
+- The product shall support user accounts, so a user can save recipes, save meal plans, and mark favorites, and have that data persist across devices.
+- Account holders shall be able to publish a meal plan and save or browse meal plans published by other users.
+- Accounts require server-side persistence beyond local storage (e.g., Firebase or a database); the specific backend is still to be decided.
+- Users must be able to delete their account and associated data.
 - User-submitted data sent to the AI provider should be limited to preferences and dietary restrictions, and should be discarded after the plan is finalized for the demo.
 
 ## 6. Nutrition and Cost Requirements
@@ -209,7 +211,7 @@ Nutrition accuracy and allergy-safe substitutions are high-priority risks becaus
 
 - Frontend: React with TypeScript
 - Backend: FastAPI
-- Persistence for MVP: browser local storage
+- Persistence for MVP: browser local storage for guests, plus server-side persistence (backend/database TBD) for account data
 - AI generation: ChatGPT via API
 - Payments: Stripe
 - Demo deployment: team member laptop with secrets stored in a local .env file
