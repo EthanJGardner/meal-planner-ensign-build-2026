@@ -1,11 +1,18 @@
-# Local dev stack: Supabase (Postgres, Auth, REST, Studio) plus Qdrant and vLLM.
+# Local dev stack: Supabase (Postgres, Auth, REST, Studio) plus Qdrant.
 # Throwaway credentials - do not deploy this.
 #
 #   Supabase API   http://localhost:54321   (supabase-js / supabase-py URL)
 #   Postgres       postgresql://postgres:postgres@localhost:54322/postgres
 #   Studio         http://localhost:54323
 #   Qdrant         http://localhost:6333    (dashboard at /dashboard)
-#   Embeddings     http://localhost:8001/v1 (OpenAI-compatible, google/embeddinggemma-2)
+#
+# These four ports are published on every network interface, and Studio has no
+# login, so only run this on a network you trust.
+#
+# Start with `docker compose up -d --wait`. The one-shot db-schema service then
+# applies supabase/schema.sql. Recipe embeddings are not served here: they come
+# from Bedrock (scripts/ingest_recipes.py) and are stored in Qdrant.
+# Full guide: docs/backend.md
 
 name: meal-planner
 
@@ -110,6 +117,41 @@ services:
     ports:
       - "54323:3000"
 
+  # One-shot: applies supabase/schema.sql once auth has created auth.users, then
+  # tells PostgREST to reload. It exits when done, so "Exited (0)" is the normal state.
+  # Skips if public.profiles already exists, so `docker compose up` is safe to repeat.
+  # That also means an edited schema.sql is NOT picked up by a database that
+  # already has the tables. To re-apply from scratch (deletes users and app data,
+  # keeps the Qdrant recipes):
+  #   docker compose rm -s -f db auth rest kong meta studio db-schema
+  #   docker volume rm meal-planner_db_data meal-planner_db_config
+  #   docker compose up -d --wait
+  # `docker compose down -v` also works but deletes the Qdrant recipes too.
+  db-schema:
+    image: postgres:17-alpine
+    depends_on:
+      db:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    volumes:
+      - ./supabase/schema.sql:/schema.sql:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ "$$(psql -tAc "select to_regclass('public.profiles') is not null")" = "t" ]; then
+          echo "schema already applied, skipping"
+        else
+          psql -v ON_ERROR_STOP=1 --single-transaction -f /schema.sql || exit 1
+          echo "schema applied"
+        fi
+        psql -c "notify pgrst, 'reload schema'"
+    restart: "no"
+
   qdrant:
     image: qdrant/qdrant:v1.19.2
     ports:
@@ -117,7 +159,6 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
-  
 configs:
   # The image creates these roles without passwords; auth and rest log in as them.
   db_roles:

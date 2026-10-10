@@ -38,9 +38,9 @@ pnpm dev:api
 pnpm dev
 ```
 
-On first start, the database applies [supabase/schema.sql](../supabase/schema.sql) automatically.
+On first start, the one-shot `db-schema` service applies [supabase/schema.sql](../supabase/schema.sql) automatically, once auth is up. It then exits, so `Exited (0)` next to it in `docker compose ps -a` is normal.
 
-Stop the stack with `docker compose down`. Add `-v` to also wipe all local data, including users.
+Stop the stack with `docker compose down`. Add `-v` to also wipe all local data: users, app tables **and the recipes in Qdrant**, which then need ingesting again. To reset only the database, see [Changing the schema](#changing-the-schema).
 
 ## Services
 
@@ -52,7 +52,7 @@ Stop the stack with `docker compose down`. Add `-v` to also wipe all local data,
 | Studio | http://localhost:54323 | Supabase dashboard: browse tables, users, run SQL |
 | Qdrant | http://localhost:6333/dashboard | Vector DB for recipes |
 
-All ports bind to `127.0.0.1` only. The credentials are throwaway local-dev values, so don't deploy this compose file.
+The Supabase API, Postgres, Studio and Qdrant ports are published on every network interface, not just `127.0.0.1`, and Studio has no login. Only run the stack on a network you trust. The credentials are throwaway local-dev values, so don't deploy this compose file.
 
 ## Secrets (`.env`)
 
@@ -121,31 +121,48 @@ All app tables live in [supabase/schema.sql](../supabase/schema.sql). Recipes th
 | Table | Purpose |
 |---|---|
 | `profiles` | One row per auth user, created automatically on sign-up |
-| `allergies` | Household allergens. **Add-only**: users can't update or delete them. |
+| `allergens`, `allergen_aliases` | The common allergen list (milk, egg, peanut…) and the other names people type for them (`dairy` → `milk`, `shrimp` → `shellfish`). Readable by anyone, writable by no client. |
+| `user_allergens` | A user's allergens picked from the common list. **Add-only.** |
+| `user_custom_allergens` | A user's other allergens, as short cleaned terms. **Add-only.** |
+| `my_allergies` (view) | Both kinds in one list, for the UI and for FastAPI |
 | `preferences` | Diet styles, likes/dislikes, household size, budget, plan length (one row per user) |
 | `nutrition_goals` | Daily macro targets plus optional body stats for the calculator (one row per user) |
 | `meal_option_sessions` | One generation run, with snapshots of the allergies, preferences and goals it used |
 | `meal_options` | Candidate recipes produced by a session, with compliance results and status |
-| `meal_plans` | A saved plan, optionally linked to the session it came from |
-| `meal_plan_slots` | One meal in a plan (day + meal type). Stores a copy of the recipe. |
+| `meal_plans` | A saved plan, optionally linked to the session it came from. Keeps its own copy of household size and budget. |
+| `meal_plan_slots` | One meal in a plan (day + meal type). Stores a copy of the recipe and points at the meal option it came from. |
 | `favorites`, `feedback` | Hearts and like/dislike per recipe |
 | `recipe_popularity` (view) | Aggregate favorite counts. Exposes no individual's data. |
+| `grocery_lists`, `grocery_items` | One list per plan, built by `build_grocery_list`. Users can tick, edit, add and remove items. |
+| `orders`, `order_items` | What the buying agent bought. Read-only for users. |
+
+`build_grocery_list(plan_id)` is a database function, called with `db.rpc("build_grocery_list", {"p_plan_id": ...})`. It adds up the ingredients of the plan's accepted slots, scaled from each recipe's servings to the plan's household size. Calling it again **replaces the list**, including items the user added and their ticks. It refuses once the plan has an order that isn't failed or cancelled.
 
 Safety rules enforced by the database itself, not just by app code:
 
 - **RLS on every table.** Users can only read and write rows where `user_id = auth.uid()`.
 - **Child rows must belong to the same user as their parent.** For example, a slot can only point at the user's own plan. This uses composite foreign keys on `(id, user_id)`.
-- **Allergies are add-only.** There are no update or delete policies, and those privileges are revoked.
+- **Allergies are add-only.** There are no update or delete policies, and those privileges are revoked. Adding a known name as a custom allergen (`dairy`, `peanuts`) stores the common allergen instead and returns no row, so read `my_allergies` again afterwards.
+- **Text that can reach the model is cleaned.** Custom allergens and the preference lists are lowercased and trimmed, then rejected with error `22023` unless each is a short plain term: 2 to 40 characters, at most 4 words, letters a-z, digits, spaces, `'`, `&` and `-` only, and no instruction-like words. This also rejects some real foods, such as `jalapeño` and `egg drop soup`. FastAPI must still pass these values to the model as data, never as instructions.
 - **No unsafe meal options.** A `meal_options` row with `allergen_safe = false` can't be inserted.
+- **A new slot must come from a stored meal option** with the same owner and recipe.
 - **Nutrition targets must be consistent.** Calories must be ≥ 1200, and macro calories (4/4/9 per gram) must be within 10% of the calorie target.
 - **One accepted meal per slot.** Rejected and replaced slots stay as history, so you can add a replacement without deleting the old row.
+- **Orders are read-only for users.** Only the buying agent writes them, through `ServiceDB`, and it must set `user_id` from the verified token itself.
 - **Deleting a user deletes all their data.** Everything cascades from `auth.users`.
+
+Known limit, accepted for the MVP: the two meal-option rules catch mistakes in our own code, not a user writing to Supabase directly with their own token. Such a user can insert a `meal_options` row marked safe, or change a slot's recipe after creating it.
 
 ### Changing the schema
 
-`schema.sql` runs automatically **only when the database is empty** (first start, or after `docker compose down -v`). It isn't idempotent, so don't re-run the whole file against a database that already has the tables.
+The `db-schema` service applies `schema.sql` **only when `public.profiles` doesn't exist yet**. On a database that already has the tables it prints `schema already applied, skipping`, so an edited `schema.sql`, or one you just pulled, changes nothing until you do one of these. The file isn't idempotent, so don't re-run the whole of it against existing tables.
 
-- **Throwaway local data:** edit `schema.sql`, then `docker compose down -v` and `docker compose up -d --wait`.
+- **Throwaway local data:** reset the database. This deletes users and app data but keeps the recipes in Qdrant:
+  ```powershell
+  docker compose rm -s -f db auth rest kong meta studio db-schema
+  docker volume rm meal-planner_db_data meal-planner_db_config
+  docker compose up -d --wait
+  ```
 - **Keep local data:** edit `schema.sql`, and also apply the change by hand, for example:
   ```powershell
   Get-Content change.sql -Raw | docker compose exec -T db psql -U postgres -v ON_ERROR_STOP=1 --single-transaction
@@ -164,7 +181,8 @@ New tables need `alter table … enable row level security` plus policies. Witho
 | FastAPI returns `401` | Missing, expired or non-user token. Sign in again in the web app. |
 | PostgREST `42501` | RLS blocked it: wrong `user_id`, a forbidden operation (such as deleting an allergy), or `ServiceDB` vs `UserDB` mixed up. |
 | PostgREST `PGRST205` "Could not find the table" | Table doesn't exist, or PostgREST hasn't reloaded its schema cache. Run `docker compose exec db psql -U postgres -c "notify pgrst, 'reload schema'"`. |
-| Schema change not showing up | Init scripts only run on an empty volume. See [Changing the schema](#changing-the-schema). |
+| Schema change not showing up, or a table from a teammate's commit is missing | `db-schema` skipped because the tables already exist (`docker compose logs db-schema`). See [Changing the schema](#changing-the-schema). |
+| `22023` "contains a word that is not allowed" | The text filter on custom allergens and preference lists rejected a term. See the safety rules above. |
 | `uv` warns `VIRTUAL_ENV ... does not match` | A different env (such as conda) is active. Harmless: uv uses the repo's `.venv`. |
 
 ## Mock stores and the shopping agent
@@ -307,5 +325,5 @@ $env:RUN_STRIPE_SANDBOX_TEST = "1"; uv run --package storefront pytest apps/stor
 ## Not built yet
 
 - **Cart and agent routes.** The cart has no Supabase table and neither the cart nor the agent has an HTTP route. Both need the login code below to load first.
-- **The API's login code does not load.** `auth.py` and `db.py` import `supabase` and `jwt`, which are not declared in `apps/api/pyproject.toml`, and `main.py` does not create the shared HTTP client that `db.py` expects.
+- **The API's database code does not load.** `db.py` imports `supabase`, which is not installed or declared in `apps/api/pyproject.toml`, and `main.py` does not create the shared HTTP client (`app.state.http`) that `db.py` expects. `auth.py` and `settings.py` load only because `pyjwt` and `pydantic-settings` are pulled in by other packages; declare them too.
 - **CRUD endpoints** for the tables above. Only `/api/health` exists today.
