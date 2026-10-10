@@ -1,0 +1,259 @@
+# Local dev stack: a trimmed Supabase (Postgres, Auth, REST, Studio) plus Qdrant.
+# Everything is bound to 127.0.0.1 and uses throwaway dev credentials - do not deploy this.
+#
+#   Supabase API   http://localhost:54321   (supabase-js / supabase-py URL)
+#   Postgres       postgresql://postgres:postgres@localhost:54322/postgres
+#   Studio         http://localhost:54323
+#   Qdrant         http://localhost:6333    (dashboard at /dashboard, gRPC on 6334)
+
+name: meal-planner
+
+# Dev-only JWT secret and the two API keys signed with it (valid until 2036).
+# The keys must be re-signed if the secret changes.
+x-supabase-keys:
+  jwt_secret: &jwt_secret super-secret-jwt-token-with-at-least-32-characters-long
+  anon_key: &anon_key eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlLWRldiIsImlhdCI6MTc2NzIyNTYwMCwiZXhwIjoyMDgyNzU4NDAwfQ.5RjQPRdqBouk8zYEf-LXt0hgi6ZxQ4YyjUVuBCBFTEY
+  service_role_key: &service_role_key eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UtZGV2IiwiaWF0IjoxNzY3MjI1NjAwLCJleHAiOjIwODI3NTg0MDB9.4vckkpzAHPStJ8vDPJBQak44MfZX-4gBb03DoG_Dvts
+  pg_meta_crypto_key: &pg_meta_crypto_key dev-only-pg-meta-crypto-key-32-chars
+
+services:
+  db:
+    image: supabase/postgres:17.6.1.136
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      POSTGRES_PORT: 5432
+      PGPORT: 5432
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: postgres
+      PGDATABASE: postgres
+      JWT_EXP: 3600
+    ports:
+      - "127.0.0.1:${SUPABASE_DB_PORT:-54322}:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - db_config:/etc/postgresql-custom
+    configs:
+      - source: db_roles
+        target: /docker-entrypoint-initdb.d/init-scripts/99-roles.sql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  auth:
+    image: supabase/gotrue:v2.196.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: http://localhost:${SUPABASE_API_PORT:-54321}/auth/v1
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD:-postgres}@db:5432/postgres
+      GOTRUE_SITE_URL: ${SITE_URL:-http://localhost:5173}
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_SECRET: *jwt_secret
+      GOTRUE_JWT_ISSUER: http://localhost:${SUPABASE_API_PORT:-54321}/auth/v1
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+
+  rest:
+    image: postgrest/postgrest:v14.17
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD:-postgres}@db:5432/postgres
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: *jwt_secret
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_EXP: 3600
+
+  # API gateway: routes /auth/v1 and /rest/v1 and checks the `apikey` header.
+  kong:
+    image: kong/kong:3.9.3
+    restart: unless-stopped
+    depends_on:
+      - auth
+      - rest
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /usr/local/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: cors,key-auth,acl
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
+      SUPABASE_ANON_KEY: *anon_key
+      SUPABASE_SERVICE_KEY: *service_role_key
+    ports:
+      - "127.0.0.1:${SUPABASE_API_PORT:-54321}:8000"
+    configs:
+      - source: kong
+        target: /home/kong/kong.template.yml
+    # Kong's declarative config cannot read env vars, so fill in the API keys at startup.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        sed -e "s|__ANON_KEY__|$$SUPABASE_ANON_KEY|" -e "s|__SERVICE_ROLE_KEY__|$$SUPABASE_SERVICE_KEY|" \
+          /home/kong/kong.template.yml > /usr/local/kong/kong.yml
+        exec /entrypoint.sh kong docker-start
+
+  meta:
+    image: supabase/postgres-meta:v0.99.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: postgres
+      PG_META_DB_USER: postgres
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      CRYPTO_KEY: *pg_meta_crypto_key
+
+  studio:
+    image: supabase/studio:2026.09.07-sha-7996410
+    restart: unless-stopped
+    depends_on:
+      - meta
+      - kong
+    environment:
+      HOSTNAME: 0.0.0.0
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_USER_READ_WRITE: postgres
+      PG_META_CRYPTO_KEY: *pg_meta_crypto_key
+      PGRST_DB_SCHEMAS: public
+      DEFAULT_ORGANIZATION_NAME: Meal Planner
+      DEFAULT_PROJECT_NAME: Local dev
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_PUBLIC_URL: http://localhost:${SUPABASE_API_PORT:-54321}
+      SUPABASE_ANON_KEY: *anon_key
+      SUPABASE_SERVICE_KEY: *service_role_key
+      AUTH_JWT_SECRET: *jwt_secret
+      # No analytics/log services in this stack.
+      ENABLED_FEATURES_LOGS_ALL: "false"
+    ports:
+      - "127.0.0.1:${SUPABASE_STUDIO_PORT:-54323}:3000"
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.2
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${QDRANT_HTTP_PORT:-6333}:6333" # REST API + dashboard at /dashboard
+      - "127.0.0.1:${QDRANT_GRPC_PORT:-6334}:6334" # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      # The image ships without curl/wget, so probe the HTTP port with bash.
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+configs:
+  # The image creates the Supabase roles without passwords; auth and rest log in as these.
+  db_roles:
+    content: |
+      ALTER USER authenticator WITH PASSWORD '${POSTGRES_PASSWORD:-postgres}';
+      ALTER USER supabase_auth_admin WITH PASSWORD '${POSTGRES_PASSWORD:-postgres}';
+
+  kong:
+    content: |
+      _format_version: "2.1"
+      _transform: true
+
+      consumers:
+        - username: anon
+          keyauth_credentials:
+            - key: __ANON_KEY__
+        - username: service_role
+          keyauth_credentials:
+            - key: __SERVICE_ROLE_KEY__
+
+      acls:
+        - consumer: anon
+          group: anon
+        - consumer: service_role
+          group: admin
+
+      services:
+        # Links opened from emails / OAuth redirects carry no apikey header.
+        - name: auth-v1-open
+          url: http://auth:9999/verify
+          routes:
+            - name: auth-v1-open
+              strip_path: true
+              paths: [/auth/v1/verify]
+          plugins:
+            - name: cors
+        - name: auth-v1-open-callback
+          url: http://auth:9999/callback
+          routes:
+            - name: auth-v1-open-callback
+              strip_path: true
+              paths: [/auth/v1/callback]
+          plugins:
+            - name: cors
+        - name: auth-v1-open-authorize
+          url: http://auth:9999/authorize
+          routes:
+            - name: auth-v1-open-authorize
+              strip_path: true
+              paths: [/auth/v1/authorize]
+          plugins:
+            - name: cors
+
+        - name: auth-v1
+          url: http://auth:9999/
+          routes:
+            - name: auth-v1-all
+              strip_path: true
+              paths: [/auth/v1/]
+          plugins:
+            - name: cors
+            - name: key-auth
+              config:
+                hide_credentials: false
+            - name: acl
+              config:
+                hide_groups_header: true
+                allow: [admin, anon]
+
+        - name: rest-v1
+          url: http://rest:3000/
+          routes:
+            - name: rest-v1-all
+              strip_path: true
+              paths: [/rest/v1/]
+          plugins:
+            - name: cors
+            - name: key-auth
+              config:
+                hide_credentials: false
+            - name: acl
+              config:
+                hide_groups_header: true
+                allow: [admin, anon]
+
+volumes:
+  db_data:
+  db_config:
+  qdrant_data:
