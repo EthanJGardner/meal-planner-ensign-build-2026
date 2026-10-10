@@ -89,6 +89,11 @@ These features round out the core flow and should ship if time allows after Esse
 - User-published meal plans
 - Browse and save weekly plans published by other users
 - Be able to add a meal plan to your calendar
+- Browse plans day-by-day in addition to week-by-week, and add a single day from someone else's plan to your own calendar instead of only a full week
+- A match score shown on browsed plans, estimating fit against the viewing user's own household size, budget, allergies, diet, and time-per-meal settings
+- Multi-week planning (e.g. up to several weeks ahead), with the ability to view, regenerate, or clear one week at a time while leaving other weeks untouched
+- An automated "fit to budget" action that swaps higher-cost meals for lower-cost alternatives until the plan is back within budget
+- An undo for the most recent plan change (e.g. after copying in a browsed plan)
 
 ### 3.4 Later
 
@@ -146,13 +151,19 @@ The final navigation and visual design should remain simple enough for the hacka
 - The system shall collect household size.
 - The system shall plan each meal for the household's number of servings.
 - The system shall collect food preferences, dietary restrictions, nutrition goals, budget, cooking-time preferences, and a configurable planning period.
+- The planning period should offer a small set of preset lengths (e.g. 3, 5, 7, or 14 days) rather than free-form entry.
+- Dietary restrictions should be offered as a standard, selectable list (e.g. vegetarian, vegan, pescatarian, halal, kosher, low-carb, dairy-free, gluten-free) rather than free text, so meals can be filtered reliably.
+- Food preferences (foods a user loves or wants to avoid) may additionally be collected as free text to bias recommendations, separate from the structured allergy and diet selections.
+- The system shall allow a user to override the household serving count for an individual meal (e.g. a smaller lunch), defaulting to the household size when left unset.
 - The system shall allow users to edit these values after initial setup.
+- The system should offer a way to reset preferences back to defaults.
 - Location should be obtained from the incoming request rather than entered manually, if location is needed.
 
 ### 5.2 Allergy and dietary safety
 
 - Allergies shall apply to the whole household by default.
 - If one household member has an allergy, generated meals shall be allergy-friendly for the entire household by default.
+- The system shall offer a standard list of common allergens (e.g. peanuts, tree nuts, milk, eggs, wheat/gluten, soy, fish, shellfish, sesame) as selectable options, plus a free-text field for adding an allergen not on the list.
 - The product may allow a user to remove an allergy flag when the user intentionally accepts responsibility for preparing a separate meal.
 - Individual allergy profiles and separate meals are outside the MVP.
 - Ingredient substitutions must not be treated as safe merely because they were suggested by the AI.
@@ -167,6 +178,10 @@ The final navigation and visual design should remain simple enough for the hacka
 - After a plan is generated, the system shall show a summary/stats section aggregating the plan's nutrition intake (e.g. calories, macros) and total cost against the user's goals and budget.
 - The system shall return alternatives when a user rejects a meal.
 - The system shall enforce a cool-off period between repeats of the same meal, so the same meal does not reappear within a set number of days of the plan.
+- The product may support assigning a meal slot as "leftovers" of a dinner cooked earlier in the plan, to reduce cooking effort and grocery cost; a leftover slot must reference a meal that was actually cooked earlier in that plan, and should be flagged if the source meal is later removed or changed.
+- If the plan spans multiple weeks, the system should let a user view, regenerate, or clear one week at a time without disturbing other weeks, and should distinguish a past/completed week from the current and upcoming weeks.
+- Each planned day should show a clear status (safe/OK vs. a problem to fix, such as an allergy conflict, a diet mismatch, an avoided food, a broken leftover reference, or an invalid serving count) alongside that day's aggregated nutrition.
+- If a user changes an allergy, diet, or other safety-relevant preference after a plan exists, the system shall automatically re-check existing planned meals and swap any that are no longer safe or compliant, and shall tell the user what was changed and why.
 
 ### 5.4 Feedback and meal replacement
 
@@ -174,7 +189,9 @@ The final navigation and visual design should remain simple enough for the hacka
 - Users shall be able to save or heart a meal.
 - Users shall be able to request an alternative.
 - The product should support replacing an individual meal without requiring the entire plan to be regenerated, if technically feasible for the MVP.
-- The MVP should support both single-meal regeneration and whole-plan regeneration.
+- The MVP should support both single-meal regeneration and whole-plan regeneration, and should allow regenerating or clearing a single week within a multi-week plan.
+- The product may offer an automated "fit to budget" action that swaps higher-cost meals for lower-cost alternatives until the plan (or the current week) is back within budget, and should tell the user what was swapped.
+- The product should offer an undo for the most recent plan-changing action (e.g. a swap, a copy-in from a browsed plan, or a fit-to-budget pass).
 - Feedback should be available for future ranking, including most-liked or most-purchased meals, and may include accept, reject, or custom feedback.
 - Social proof and ranking are intentionally out of scope for the demo.
 
@@ -187,7 +204,16 @@ The final navigation and visual design should remain simple enough for the hacka
 - Payment handling must use Stripe-hosted checkout or Stripe Elements so that card data never touches the backend directly.
 - Store price comparison and location pins are outside the core MVP.
 
-### 5.6 Data persistence and accounts
+### 5.6 Social discovery (optional)
+
+- If implemented, the product may let users browse meal plans published by other users, split into day-by-day plans and week-by-week plans.
+- Browsed plans should be ranked or scored against the viewing user's own household size, budget, allergies, diet, and time-per-meal settings, so the closest matches surface first.
+- A user should be able to view a browsed plan's recipes before committing to it, then add either a full week or a single day into a chosen week of their own plan.
+- Meals copied in from a browsed plan must still be checked against the viewing user's own allergies and diet, and swapped automatically if unsafe or non-compliant.
+- Users should be able to publish their own current week to the shared feed.
+- This feature is optional for the MVP; if it ships, it still depends on the cold-start problem of having enough published plans, which the team should address (e.g. seeding sample plans) before relying on it in a demo.
+
+### 5.7 Data persistence and accounts
 
 - The MVP should persist preferences and selected meals across a browser refresh, via local storage, independent of login.
 - The product shall support user accounts, so a user can save recipes, save meal plans, and mark favorites, and have that data persist across devices.
@@ -204,6 +230,7 @@ The final navigation and visual design should remain simple enough for the hacka
 - Budget is a hard MVP constraint for meal selection, not just an estimate shown to users.
 - The system should explain when a plan cannot satisfy all requested constraints.
 - Nutrition and cost estimates should rely on macro values and should be treated as approximate rather than medical or exact commercial data.
+- A recipe detail view should show, at minimum: name, per-serving nutrition (calories, protein), cooking time, estimated cost, flagged allergens, ingredient list, and step-by-step directions, with a visible note that the recipe is a sample/unverified and that allergen and nutrition data should be checked by the user.
 
 Nutrition accuracy and allergy-safe substitutions are high-priority risks because incorrect output could affect user safety.
 
