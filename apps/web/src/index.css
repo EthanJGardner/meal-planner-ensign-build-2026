@@ -70,10 +70,10 @@
   --ink: #ebe8dd;
   --mute: #b8b0a4;
   --line: #4a3f39;
-  --green: #8fd05a;
-  --green-ink: #1b1614;
+  --green: #2a6008 ;
+  --green-ink: #ffffff;
   --bad: #ff8a80;
-  --ok: #8fd05a;
+  --ok: #2a6008;
   --cell: #3b2f22;
   --cell-alt: #33291f;
   --tint: #5a3a22;
@@ -142,7 +142,7 @@ body {
 }
 
 .app-header__mark {
-  width: 40px;
+  width: 150px;
   height: 40px;
   object-fit: contain;
 }
@@ -214,13 +214,14 @@ body {
   padding: 24px 0 8px;
 }
 
-.hero__eyebrow {
-  font-family: var(--font-script);
-  letter-spacing: 0.3em;
-  text-transform: uppercase;
-  font-size: 15px;
-  color: var(--orange);
-  margin: 0 0 4px;
+/* The logo replaces the wordmark that used to sit above the hero title, so it
+   is sized off the viewport the way the title beneath it is. The width follows
+   from the intrinsic 879x742 ratio. */
+.hero__logo {
+  display: block;
+  height: clamp(104px, 17vw, 168px);
+  width: auto;
+  margin: 0 auto 10px;
 }
 
 .hero__title,

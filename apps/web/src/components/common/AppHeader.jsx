@@ -1,4 +1,4 @@
-import logo from '../../assets/pic-logo.png'
+import logo from '../../assets/text-logo.png'
 import { ThemeToggle } from './ThemeToggle'
 
 const STEPS = [
@@ -12,7 +12,6 @@ export function AppHeader({ view, onNavigate, groceryReady }) {
     <header className="app-header">
       <p className="app-header__brand">
         <img className="app-header__mark" src={logo} alt="" width="40" height="40" />
-        <span className="app-header__word">FeedMe</span>
       </p>
 
       <nav className="app-nav" aria-label="Main">

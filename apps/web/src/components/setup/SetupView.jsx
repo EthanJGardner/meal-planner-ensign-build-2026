@@ -1,3 +1,4 @@
+import logo from '../../assets/pic-logo.png'
 import { CURRENT_WEEK } from '../../lib/constants'
 import { isWeekEmpty } from '../../lib/planner'
 import { useHousehold } from '../../hooks/useHousehold'
@@ -21,7 +22,13 @@ export function SetupView({ onSeePlan }) {
   return (
     <>
       <section className="hero">
-        <p className="hero__eyebrow">FeedMe</p>
+        <img
+          className="hero__logo"
+          src={logo}
+          alt="FeedMe"
+          width="879"
+          height="742"
+        />
         <h1 className="hero__title">Weekly meals your whole table can eat</h1>
         <p className="hero__lede">
           Tell us the allergies, the budget, and how long you have to cook. We
