@@ -52,7 +52,9 @@ Users should be able to:
 5. Review the recommended meals and alternatives.
 6. Accept, reject, save, or replace meals.
 7. Edit preferences and regenerate the plan.
-8. View the ingredients and grocery list needed for the plan.
+8. Submit their own recipes, with their own ingredients, prices and macro
+   values, and have those recipes planned alongside the generated ones.
+9. View the ingredients and grocery list needed for the plan.
 
 ## 3. MVP Scope
 
@@ -66,6 +68,7 @@ These features are required for a working demo and must ship first:
 - User preferences input (household size, preference and household setup form)
 - Meal viewing and selection, including a best-fit recommendation with alternatives, recipe details, and ingredient quantities
 - Meal variety, with a cool-off period so the same meal isn't repeated too soon in the plan
+- User-submitted recipes: a user can add a recipe of their own, with its ingredients, quantities, prices and macro values, and have it planned, swapped in, and bought for like any other recipe
 - Grocery list generation
 - A simple, usable demo interface
 
@@ -82,7 +85,9 @@ These features round out the core flow and should ship if time allows after Esse
 
 ### 3.3 Optional
 
-- Custom recipes with ingredient swaps
+- Ingredient swaps inside a single recipe (e.g. substituting one ingredient without replacing the meal)
+- Importing a recipe from a URL or a photo instead of typing it in
+- Publishing a user's own recipes to the shared feed, separately from publishing a whole plan
 - Preferred grocery stores
 - Fridge-based meal suggestions
 - Saving favorite recipes and meal plans to an account
@@ -132,6 +137,7 @@ The product may be organized around the following sections:
 - Menu
 - Grocery
 - Recipe
+- My recipes (the user's own submitted recipes)
 - Ingredients, including estimated cost
 - Plan summary/stats, showing aggregated nutrition intake and cost across the plan
 
@@ -156,6 +162,7 @@ The final navigation and visual design should remain simple enough for the hacka
 - Food preferences (foods a user loves or wants to avoid) may additionally be collected as free text to bias recommendations, separate from the structured allergy and diet selections.
 - The system shall allow a user to override the household serving count for an individual meal (e.g. a smaller lunch), defaulting to the household size when left unset.
 - The system shall allow users to edit these values after initial setup.
+- The recipes available to a household shall include both the system's recipes and any the user has submitted themselves (section 5.8).
 - The system should offer a way to reset preferences back to defaults.
 - Location should be obtained from the incoming request rather than entered manually, if location is needed.
 
@@ -167,6 +174,7 @@ The final navigation and visual design should remain simple enough for the hacka
 - The product may allow a user to remove an allergy flag when the user intentionally accepts responsibility for preparing a separate meal.
 - Individual allergy profiles and separate meals are outside the MVP.
 - Ingredient substitutions must not be treated as safe merely because they were suggested by the AI.
+- A user-submitted recipe shall be scanned for allergens from its ingredient names, and whatever that scan finds shall be flagged on the recipe in addition to whatever the user declared. A user must not be able to make a recipe appear allergen-free by leaving allergens unticked.
 - The product must communicate that nutrition and allergy information is not medical advice and should be checked by the user.
 
 ### 5.3 Meal-plan generation
@@ -176,6 +184,7 @@ The final navigation and visual design should remain simple enough for the hacka
 - Generated meals should include at least a name, meal type, servings, ingredients, quantities, preparation instructions, and estimated cooking time.
 - The plan should expose nutrition and cost estimates when those values are available.
 - After a plan is generated, the system shall show a summary/stats section aggregating the plan's nutrition intake (e.g. calories, macros) and total cost against the user's goals and budget.
+- Meal generation shall draw on user-submitted recipes as well as the system's own, subject to the same allergy, diet, cooking-time and budget filters.
 - The system shall return alternatives when a user rejects a meal.
 - The system shall enforce a cool-off period between repeats of the same meal, so the same meal does not reappear within a set number of days of the plan.
 - The product may support assigning a meal slot as "leftovers" of a dinner cooked earlier in the plan, to reduce cooking effort and grocery cost; a leftover slot must reference a meal that was actually cooked earlier in that plan, and should be flagged if the source meal is later removed or changed.
@@ -188,6 +197,7 @@ The final navigation and visual design should remain simple enough for the hacka
 - Users shall be able to accept or reject a meal; accepting a meal confirms it for the plan.
 - Users shall be able to save or heart a meal.
 - Users shall be able to request an alternative.
+- Users shall be able to assign one of their own submitted recipes to any meal slot it fits, in the same way they would choose one of the system's recipes.
 - The product should support replacing an individual meal without requiring the entire plan to be regenerated, if technically feasible for the MVP.
 - The MVP should support both single-meal regeneration and whole-plan regeneration, and should allow regenerating or clearing a single week within a multi-week plan.
 - The product may offer an automated "fit to budget" action that swaps higher-cost meals for lower-cost alternatives until the plan (or the current week) is back within budget, and should tell the user what was swapped.
@@ -222,15 +232,30 @@ The final navigation and visual design should remain simple enough for the hacka
 - Users must be able to delete their account and associated data.
 - User-submitted data sent to the AI provider should be limited to preferences and dietary restrictions, and should be discarded after the plan is finalized for the demo.
 
+### 5.8 User-submitted recipes
+
+- Users shall be able to submit their own recipes, and those recipes shall be usable everywhere a system recipe is: assigned to a meal slot, chosen by the generator, offered as an alternative, and costed into the grocery list.
+- A submitted recipe shall require, at minimum: a name, the meals it can fill (breakfast, lunch, and/or dinner), how many servings it makes, an estimated cooking time, calories and protein, at least one ingredient with an amount, and at least one preparation step. Carbs, fat, ingredient units and ingredient prices are optional.
+- Validation of a submitted recipe shall be at least as strict as the validation applied to an AI-generated recipe, because both end up in the same plan, grocery list and nutrition totals.
+- A user shall enter amounts, prices and macros for the whole recipe as they cook it, and the system shall divide them by the number of servings it makes, so a meal can be scaled to any number of people.
+- Recipe names shall be unique across the recipes available to a household, and renaming a submitted recipe shall carry any meal slot already holding it.
+- Users shall be able to view, edit and delete their own recipes. Deleting or editing a recipe that is already in a plan shall trigger the same automatic re-check as a preference change (section 5.3): affected meals are swapped and the user is told what changed and why.
+- Macro and price values on a submitted recipe are the user's own and shall be displayed as entered by the user and unverified, never presented as system estimates (section 6).
+- A user's dietary tags on their own recipe are a claim, not a verified fact, and the system shall warn when the ingredients contradict a tag (e.g. a recipe marked dairy-free whose ingredients read as containing milk).
+- The system shall warn when a submitted recipe conflicts with the household's own allergies or diet, and shall exclude it from generated plans for as long as that conflict stands, rather than silently planning it.
+- Submitted recipes shall persist across a browser refresh, independently of any plan, so regenerating a plan never discards them. Account holders' recipes shall persist to the account (section 5.7).
+- Submitted recipes shall be sent to the AI planner as candidates, so a generated plan can place them. The planner must not overwrite a user's macro or price values with its own estimates.
+
 ## 6. Nutrition and Cost Requirements
 
 - Nutrition values must be labeled as estimates unless they come from a verified data source.
 - Serving sizes must be reflected in nutrition and cost calculations.
-- The system should identify the source or calculation method for nutrition values.
+- The system should identify the source or calculation method for nutrition values, including distinguishing values a user entered for their own recipe from values the system estimated.
 - Budget is a hard MVP constraint for meal selection, not just an estimate shown to users.
 - The system should explain when a plan cannot satisfy all requested constraints.
 - Nutrition and cost estimates should rely on macro values and should be treated as approximate rather than medical or exact commercial data.
 - A recipe detail view should show, at minimum: name, per-serving nutrition (calories, protein), cooking time, estimated cost, flagged allergens, ingredient list, and step-by-step directions, with a visible note that the recipe is a sample/unverified and that allergen and nutrition data should be checked by the user.
+- A user-submitted recipe with no ingredient prices would read as free against the budget, so the system should tell the user that rather than quietly undercounting the plan's cost.
 
 Nutrition accuracy and allergy-safe substitutions are high-priority risks because incorrect output could affect user safety.
 
@@ -252,6 +277,7 @@ FastAPI is preferred because meal-planning logic may later be reused by mobile o
 - AI output should use a strict structured JSON schema rather than unvalidated free-form text.
 - The backend should validate generated meals before returning them to the frontend.
 - Invalid, incomplete, unsafe, or unavailable AI responses must produce an explicit user-facing error.
+- User-submitted recipes passed to the AI planner must be validated on return exactly as generated recipes are, and a planner response that alters a user's own macro or price values must be rejected rather than displayed.
 - API keys and other secrets must remain server-side and must not be committed to the repository.
 - The application should have a demo fallback or sample data path if the AI service is unavailable.
 - Meal-generation safety checks should gate ingredient substitutions against allergy constraints and the system should not suggest unsafe substitutions.
@@ -270,10 +296,11 @@ The MVP is ready for demonstration when a test user can:
 2. Generate a plan containing meals sized for the household.
 3. Identify the recommended meal and available alternatives.
 4. Reject or replace at least one meal.
-5. Save or select meals and view the resulting grocery list.
-6. Check out and pay for the grocery list via Stripe.
-7. Refresh the browser and retain the relevant preferences and selections.
-8. Understand that nutrition and allergy information requires verification.
+5. Submit a recipe of their own, with its ingredients and macro values, and then place it in the plan and see it in the grocery list.
+6. Save or select meals and view the resulting grocery list.
+7. Check out and pay for the grocery list via Stripe.
+8. Refresh the browser and retain the relevant preferences, submitted recipes, and selections.
+9. Understand that nutrition and allergy information requires verification, and which numbers are their own.
 
 The team should test the flow against the existing user personas, including cases involving allergies, budget constraints, household size, and meal regeneration.
 
@@ -284,7 +311,8 @@ The team should test the flow against the existing user personas, including case
 3. Build the preference and household form, with allergies first.
 4. Implement structured AI meal generation and validation.
 5. Display the plan, alternatives, recipes, and grocery list.
-6. Add meal replacement, feedback, and local persistence.
-7. Test the core personas and safety-related edge cases.
-8. Polish the UI and prepare the demo.
-9. Add optional features only after the success criteria are met.
+6. Add the user's own recipe submission, with validation and allergen scanning.
+7. Add meal replacement, feedback, and local persistence.
+8. Test the core personas and safety-related edge cases.
+9. Polish the UI and prepare the demo.
+10. Add optional features only after the success criteria are met.

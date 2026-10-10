@@ -7,6 +7,10 @@ import {
   WEEKS_IN_PLAN,
 } from '../lib/constants'
 import { requestMealPlan, requestRecipeAlternative } from '../lib/api'
+import {
+  mergeCustomRecipes,
+  withoutCustomRecipes,
+} from '../lib/customRecipes'
 import { demoAlternative, emptyDemoPlan, generateDemoPlan } from '../lib/demoPlan'
 import {
   emptySlot,
@@ -17,6 +21,7 @@ import {
   resyncWeek,
 } from '../lib/planner'
 import { scoreSharedPlan } from '../lib/sharedPlans'
+import { useCustomRecipes } from '../hooks/useCustomRecipes'
 import { useHousehold } from '../hooks/useHousehold'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 import { MealPlanContext } from './contexts'
@@ -31,12 +36,21 @@ const cloneWeeks = (weeks) =>
   weeks.map((week) => week.map((day) => day.map((slot) => ({ ...slot }))))
 
 // Only these inputs can make an existing meal unsafe or non-compliant, so only
-// these trigger an automatic re-check of the plan.
-const safetySignature = (preferences) =>
+// these trigger an automatic re-check of the plan. Editing or deleting one of
+// the user's own recipes counts: it can take a meal out of the catalog, or
+// change what the meal contains.
+const safetySignature = (preferences, customRecipes) =>
   JSON.stringify([
     preferences.allergies,
     preferences.dietaryRestrictions,
     preferences.foodPreferences,
+    customRecipes.map((recipe) => [
+      recipe.name,
+      recipe.allergens,
+      recipe.tags,
+      recipe.slots,
+      (recipe.ingredients ?? []).map((ingredient) => ingredient.name),
+    ]),
   ])
 
 const listOf = (items, limit = 3) => {
@@ -68,7 +82,7 @@ function describeResync(changes) {
     )
   }
 
-  return `Your setup changed, so we ${parts.join(' and ')}. Check the plan before you shop.`
+  return `Your setup or your recipes changed, so we ${parts.join(' and ')}. Check the plan before you shop.`
 }
 
 function describePlan(preferences) {
@@ -84,10 +98,39 @@ function describePlan(preferences) {
 
 export function MealPlanProvider({ children }) {
   const { preferences } = useHousehold()
+  const { customRecipes } = useCustomRecipes()
   // There is always a plan object so the recipe catalog is available to
   // Discover before the user has generated anything. An untouched plan is
   // simply one with every week empty.
-  const [plan, setPlan] = useLocalStorage(STORAGE_KEY, emptyDemoPlan)
+  const [storedPlan, setStoredPlan] = useLocalStorage(STORAGE_KEY, emptyDemoPlan)
+
+  // Requirement 5.8: the user's own recipes are layered over whatever catalog
+  // the plan was built with, so a recipe submitted after the plan exists is
+  // immediately offered for every slot without rebuilding anything. They are
+  // stripped again on the way back to storage, so the recipe book stays the one
+  // place they live and an edit or a delete is never shadowed by a stale copy.
+  const plan = useMemo(
+    () => ({
+      ...storedPlan,
+      recipes: mergeCustomRecipes(storedPlan.recipes, customRecipes),
+    }),
+    [storedPlan, customRecipes],
+  )
+
+  const setPlan = useCallback(
+    (next) =>
+      setStoredPlan((current) => {
+        const withCustom = {
+          ...current,
+          recipes: mergeCustomRecipes(current.recipes, customRecipes),
+        }
+        const resolved = typeof next === 'function' ? next(withCustom) : next
+        if (!resolved) return current
+        return { ...resolved, recipes: withoutCustomRecipes(resolved.recipes) }
+      }),
+    [customRecipes, setStoredPlan],
+  )
+
   const [currentWeek, setCurrentWeek] = useState(CURRENT_WEEK)
   const [status, setStatus] = useState('idle')
   const [error, setError] = useState(null)
@@ -109,9 +152,9 @@ export function MealPlanProvider({ children }) {
   // adjust-state-during-render pattern rather than an effect, so the corrected
   // plan is part of the same render the new preferences arrive in.
   const [lastSignature, setLastSignature] = useState(() =>
-    safetySignature(preferences),
+    safetySignature(preferences, customRecipes),
   )
-  const signature = safetySignature(preferences)
+  const signature = safetySignature(preferences, customRecipes)
 
   if (signature !== lastSignature) {
     setLastSignature(signature)
@@ -132,7 +175,7 @@ export function MealPlanProvider({ children }) {
     clearTransient()
 
     try {
-      const generated = await requestMealPlan(preferences)
+      const generated = await requestMealPlan(preferences, customRecipes)
       setPlan(generated)
       setCurrentWeek(CURRENT_WEEK)
       setNote(describePlan(preferences))
@@ -147,7 +190,7 @@ export function MealPlanProvider({ children }) {
       }
 
       try {
-        setPlan(generateDemoPlan(preferences))
+        setPlan(generateDemoPlan(preferences, customRecipes))
         setCurrentWeek(CURRENT_WEEK)
         setNotice(SAMPLE_DATA_NOTICE)
         setNote(describePlan(preferences))
@@ -157,7 +200,7 @@ export function MealPlanProvider({ children }) {
         setStatus('error')
       }
     }
-  }, [clearTransient, preferences, setPlan])
+  }, [clearTransient, customRecipes, preferences, setPlan])
 
   const regenerateWeek = useCallback(
     (week) => {
@@ -248,6 +291,31 @@ export function MealPlanProvider({ children }) {
       clearTransient()
     },
     [clearTransient, setPlan],
+  )
+
+  // Requirement 5.8: a slot stores a recipe by name, so renaming one of the
+  // user's own recipes has to carry every slot that was holding it. Without
+  // this the plan would be left pointing at a name nothing answers to.
+  const renameSlotRecipe = useCallback(
+    (from, to) => {
+      if (!from || !to || from === to) return
+
+      setPlan((current) => {
+        if (!current) return current
+
+        const weeks = cloneWeeks(current.weeks)
+        for (const week of weeks) {
+          for (const day of week) {
+            for (const slot of day) {
+              if (slot.recipe === from) slot.recipe = to
+            }
+          }
+        }
+
+        return { ...current, weeks }
+      })
+    },
+    [setPlan],
   )
 
   const setSlotServings = useCallback(
@@ -601,6 +669,7 @@ export function MealPlanProvider({ children }) {
       clearWeek,
       setSlot,
       setSlotServings,
+      renameSlotRecipe,
       acceptSlot,
       rejectSlot,
       toggleSavedSlot,
@@ -631,6 +700,7 @@ export function MealPlanProvider({ children }) {
       clearWeek,
       setSlot,
       setSlotServings,
+      renameSlotRecipe,
       acceptSlot,
       rejectSlot,
       toggleSavedSlot,

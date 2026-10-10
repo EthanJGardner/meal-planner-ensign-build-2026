@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { CURRENT_WEEK } from '../lib/constants'
 import { isWeekEmpty } from '../lib/planner'
+import { CustomRecipeProvider } from '../contexts/CustomRecipeProvider'
 import { HouseholdProvider } from '../contexts/HouseholdProvider'
 import { MealPlanProvider } from '../contexts/MealPlanProvider'
 import { useMealPlan } from '../hooks/useMealPlan'
@@ -46,9 +47,13 @@ function Shell() {
 export default function Home() {
   return (
     <HouseholdProvider>
-      <MealPlanProvider>
-        <Shell />
-      </MealPlanProvider>
+      {/* The recipe book sits above the plan because the plan's catalog is
+          layered on top of the user's own recipes. */}
+      <CustomRecipeProvider>
+        <MealPlanProvider>
+          <Shell />
+        </MealPlanProvider>
+      </CustomRecipeProvider>
     </HouseholdProvider>
   )
 }

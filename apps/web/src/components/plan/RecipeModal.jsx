@@ -1,5 +1,6 @@
 import { MEAL_SLOTS, MEAL_STATUS, SLOT_LABELS, WEEK_DAYS } from '../../lib/constants'
 import { allergenConflicts } from '../../lib/allergySafety'
+import { isCustomRecipe } from '../../lib/customRecipes'
 import { alternativesFor, findRecipe, slotServings } from '../../lib/planner'
 import { recipeProblems } from '../../lib/mealFilters'
 import { useHousehold } from '../../hooks/useHousehold'
@@ -7,7 +8,7 @@ import { useMealPlan } from '../../hooks/useMealPlan'
 import { Modal } from '../common/Modal'
 import { RecipeDetail } from './RecipeDetail'
 
-export function RecipeModal({ week, day, slotIndex, onClose }) {
+export function RecipeModal({ week, day, slotIndex, onClose, onEditRecipe }) {
   const { preferences } = useHousehold()
   const {
     plan,
@@ -82,6 +83,15 @@ export function RecipeModal({ week, day, slotIndex, onClose }) {
         >
           {isBusy ? 'Finding another…' : 'Suggest another'}
         </button>
+        {isCustomRecipe(recipe) ? (
+          <button
+            type="button"
+            className="button"
+            onClick={() => onEditRecipe?.(recipe)}
+          >
+            Edit this recipe
+          </button>
+        ) : null}
       </div>
 
       {alternatives.length ? (

@@ -44,7 +44,20 @@ const ALLERGEN_KEYWORDS = {
 
 // Ingredients named after an allergen they do not actually contain.
 const SAFE_EXCEPTIONS = {
-  Milk: ['oat milk', 'almond milk', 'soy milk', 'coconut milk', 'rice milk'],
+  Milk: [
+    'oat milk',
+    'almond milk',
+    'soy milk',
+    'coconut milk',
+    'rice milk',
+    // "butter" matches Milk, but a nut or fruit butter contains none.
+    'peanut butter',
+    'almond butter',
+    'cashew butter',
+    'sunflower butter',
+    'cocoa butter',
+    'apple butter',
+  ],
   'Tree nuts': ['coconut milk'],
   'Wheat/Gluten': ['corn tortilla', 'rice noodle'],
 }
@@ -94,6 +107,16 @@ function findCustomConflicts(recipe, allergies) {
     const needle = allergy.trim().toLowerCase()
     return needle.length > 1 && haystack.includes(needle)
   })
+}
+
+// Requirement 5.8: a user writing out their own recipe will not always flag its
+// allergens, so the ingredient scan is run over the recipe on its own and what
+// it finds is added to the recipe's declared list. The scan is the same one the
+// household gate uses, so a recipe can never declare its way past it.
+export function detectedAllergens(recipe) {
+  return COMMON_ALLERGENS.filter(
+    (allergen) => findIngredientConflicts(recipe, [allergen]).length > 0,
+  )
 }
 
 // Every allergen that bars this recipe, as labels ready to show the user.

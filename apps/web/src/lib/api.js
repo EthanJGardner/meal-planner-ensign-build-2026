@@ -1,11 +1,12 @@
 import { CURRENT_WEEK, MEAL_SLOTS, WEEKS_IN_PLAN } from './constants.js'
 import { allergenConflicts } from './allergySafety.js'
+import { mergeCustomRecipes } from './customRecipes.js'
 import { SAMPLE_RECIPES } from './sampleRecipes.js'
 import { emptySlot, emptyWeeks } from './planner.js'
 
 // Contract expected from the FastAPI backend:
 //
-// POST /api/meal-plan              { preferences } -> { plan }
+// POST /api/meal-plan              { preferences, customRecipes } -> { plan }
 // POST /api/meal-plan/alternative  { recipe, slot, preferences, excludeNames }
 //                                    -> { recipe }
 // POST /api/checkout/session       { items, total } -> { url }
@@ -20,6 +21,13 @@ import { emptySlot, emptyWeeks } from './planner.js'
 //
 // Quantities, costs and nutrition are all PER SERVING. The frontend scales
 // them to the household size, so the backend never has to know it.
+//
+// `customRecipes` are recipes the user wrote themselves, in the same per-serving
+// Meal shape minus `day` and `mealType` (they carry `slots` instead, naming the
+// meals they can fill). The planner may place them in the plan like any other
+// recipe; a meal it returns under a custom recipe's name is treated as that
+// recipe. The planner must not invent macros for them: the user's numbers are
+// the ones shown, and `nutritionSource` says so.
 
 const REQUEST_TIMEOUT_MS = 60_000
 
@@ -142,14 +150,16 @@ function assertAllergySafe(recipes, allergies) {
 
 // The planner's recipes sit alongside the sample catalog so the Plan view's
 // dropdowns still offer a full set of swaps. A planner recipe wins on a name
-// clash because it is the one the plan was actually built from.
-function mergeCatalog(planned) {
+// clash because it is the one the plan was actually built from, except against
+// the user's own recipes, which are layered on last so their numbers are never
+// overwritten by the planner's guess at them.
+function mergeCatalog(planned, customRecipes) {
   const byName = new Map(SAMPLE_RECIPES.map((recipe) => [recipe.name, { ...recipe, source: 'sample' }]))
   for (const recipe of planned) byName.set(recipe.name, recipe)
-  return [...byName.values()]
+  return mergeCustomRecipes([...byName.values()], customRecipes)
 }
 
-function buildPlan(payload, preferences) {
+function buildPlan(payload, preferences, customRecipes) {
   const raw = payload?.plan ?? payload
   if (!raw || !Array.isArray(raw.meals) || !raw.meals.length) {
     throw invalid('The planner returned a plan with no meals.')
@@ -180,16 +190,16 @@ function buildPlan(payload, preferences) {
     id: raw.id ?? `plan-${Date.now()}`,
     createdAt: raw.createdAt ?? new Date().toISOString(),
     source: 'planner',
-    recipes: mergeCatalog(recipes),
+    recipes: mergeCatalog(recipes, customRecipes),
     weeks,
     confirmedWeek: null,
     warnings: Array.isArray(raw.warnings) ? raw.warnings : [],
   }
 }
 
-export async function requestMealPlan(preferences) {
-  const payload = await postJson('/api/meal-plan', { preferences })
-  return buildPlan(payload, preferences)
+export async function requestMealPlan(preferences, customRecipes = []) {
+  const payload = await postJson('/api/meal-plan', { preferences, customRecipes })
+  return buildPlan(payload, preferences, customRecipes)
 }
 
 export async function requestRecipeAlternative({

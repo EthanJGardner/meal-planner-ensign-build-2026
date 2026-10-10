@@ -63,6 +63,14 @@ export const PLANNING_PERIOD_OPTIONS = [
   { label: '14 days', value: 14 },
 ]
 
+// Marks a recipe the user typed in themselves, as opposed to one from the
+// sample catalog ('sample') or the planner service ('planner').
+export const CUSTOM_RECIPE_SOURCE = 'custom'
+
+// Requirement 5.8: a user-submitted recipe carries its own macro values, so we
+// record where those numbers came from.
+export const DEFAULT_CUSTOM_NUTRITION_SOURCE = 'Entered by you, not verified'
+
 export const MEAL_STATUS = {
   PENDING: 'pending',
   ACCEPTED: 'accepted',

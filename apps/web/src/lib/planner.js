@@ -7,6 +7,7 @@
 import {
   COOL_OFF_DAYS,
   CURRENT_WEEK,
+  CUSTOM_RECIPE_SOURCE,
   MEAL_SLOTS,
   MEAL_STATUS,
   WEEKS_IN_PLAN,
@@ -701,13 +702,19 @@ export function decodeSlotValue(value) {
 // Every recipe that can fill this slot, plus leftovers of anything already
 // cooked earlier in the plan.
 export function slotOptions(plan, week, day, slotIndex, preferences) {
+  // A recipe the user wrote is called out so they can find it among the rest.
+  const optionLabel = (recipe) =>
+    recipe.source === CUSTOM_RECIPE_SOURCE
+      ? `${recipe.name} (yours)`
+      : recipe.name
+
   const options = recipesForSlot(plan, slotIndex).map((recipe) => {
     const problems = recipeProblems(recipe, preferences)
     return {
       value: encodeSlotValue(recipe.name, false),
       label: problems.length
-        ? `${recipe.name} — ${problems[0].message}`
-        : recipe.name,
+        ? `${optionLabel(recipe)} — ${problems[0].message}`
+        : optionLabel(recipe),
       unsafe: problems.some((problem) => problem.kind === 'allergy'),
       problem: problems.length > 0,
     }
@@ -717,7 +724,7 @@ export function slotOptions(plan, week, day, slotIndex, preferences) {
     .filter((recipe) => cookedBefore(plan, week, day, slotIndex, recipe.name))
     .map((recipe) => ({
       value: encodeSlotValue(recipe.name, true),
-      label: `Leftovers: ${recipe.name}`,
+      label: `Leftovers: ${optionLabel(recipe)}`,
       unsafe: !isRecipeCompliant(recipe, preferences),
       problem: !isRecipeCompliant(recipe, preferences),
     }))

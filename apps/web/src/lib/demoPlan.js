@@ -4,6 +4,7 @@
 
 import { CURRENT_WEEK } from './constants.js'
 import { SAMPLE_RECIPES } from './sampleRecipes.js'
+import { mergeCustomRecipes } from './customRecipes.js'
 import { fillsSlot, isRecipeCompliant } from './mealFilters.js'
 import { createEmptyPlan, generateWeeks, recipeCostPerServing } from './planner.js'
 
@@ -14,8 +15,10 @@ const sampleCatalog = () =>
     source: 'sample',
   }))
 
-export function emptyDemoPlan() {
-  return createEmptyPlan(sampleCatalog())
+// Requirement 5.8: the user's own recipes are part of the catalog the generator
+// draws from, so a submitted recipe can be planned like any other.
+export function emptyDemoPlan(customRecipes = []) {
+  return createEmptyPlan(mergeCustomRecipes(sampleCatalog(), customRecipes))
 }
 
 // Week 0 is shown as an already-completed week so the Plan view has history to
@@ -25,8 +28,8 @@ function seedCompletedWeek(plan, preferences) {
   return result.error ? plan : { ...plan, weeks: result.weeks }
 }
 
-export function generateDemoPlan(preferences) {
-  const base = seedCompletedWeek(emptyDemoPlan(), preferences)
+export function generateDemoPlan(preferences, customRecipes = []) {
+  const base = seedCompletedWeek(emptyDemoPlan(customRecipes), preferences)
 
   const result = generateWeeks(base, preferences, {
     startWeek: CURRENT_WEEK,

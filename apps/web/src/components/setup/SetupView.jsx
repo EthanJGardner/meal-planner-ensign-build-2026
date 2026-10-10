@@ -8,6 +8,7 @@ import { Banner } from '../common/Banner'
 import { LoadingState } from '../common/LoadingState'
 import { SafetyDisclaimer } from '../common/SafetyDisclaimer'
 import { DiscoverSection } from '../discover/DiscoverSection'
+import { MyRecipesSection } from '../recipes/MyRecipesSection'
 
 export function SetupView({ onSeePlan }) {
   const { preferences, resetPreferences } = useHousehold()
@@ -110,6 +111,7 @@ export function SetupView({ onSeePlan }) {
         )}
       </section>
 
+      <MyRecipesSection />
       <DiscoverSection />
       <SafetyDisclaimer />
     </>

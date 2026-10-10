@@ -1,5 +1,17 @@
+import { CUSTOM_RECIPE_SOURCE } from '../../lib/constants'
+
 const money = (value) => (value == null ? '—' : `$${Number(value).toFixed(2)}`)
 const round = (value) => Math.round(value * 100) / 100
+
+// Requirement 6: the reader has to be able to tell whose numbers these are.
+const SOURCE_NOTES = {
+  [CUSTOM_RECIPE_SOURCE]:
+    'Your own recipe. The nutrition, allergens and prices are the values you entered and have not been verified.',
+  sample:
+    'Sample recipe. Nutrition, allergens and prices are estimates and are not verified.',
+  planner:
+    'Generated recipe. Nutrition, allergens and prices are estimates and are not verified.',
+}
 
 // Requirement 6: name, per-serving nutrition, cooking time, estimated cost,
 // flagged allergens, ingredients and directions, with the estimate caveat.
@@ -28,7 +40,10 @@ export function RecipeDetail({ recipe, servings, conflicts = [] }) {
       ) : null}
 
       <section className="recipe__section">
-        <h3 className="recipe__heading">Nutrition per serving (estimated)</h3>
+        <h3 className="recipe__heading">
+          Nutrition per serving (
+          {recipe.source === CUSTOM_RECIPE_SOURCE ? 'yours' : 'estimated'})
+        </h3>
         <ul className="macro-list">
           <li>
             <span>{nutrition.calories}</span> kcal
@@ -94,10 +109,8 @@ export function RecipeDetail({ recipe, servings, conflicts = [] }) {
       </section>
 
       <p className="fine-print">
-        {recipe.source === 'sample'
-          ? 'Sample recipe. Nutrition, allergens and prices are estimates and are not verified.'
-          : 'Generated recipe. Nutrition, allergens and prices are estimates and are not verified.'}{' '}
-        Check the product labels yourself before cooking.
+        {SOURCE_NOTES[recipe.source] ?? SOURCE_NOTES.planner} Check the product
+        labels yourself before cooking.
       </p>
     </div>
   )

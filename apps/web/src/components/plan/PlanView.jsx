@@ -6,6 +6,7 @@ import { useMealPlan } from '../../hooks/useMealPlan'
 import { usePlanSummary } from '../../hooks/usePlanSummary'
 import { Banner } from '../common/Banner'
 import { SafetyDisclaimer } from '../common/SafetyDisclaimer'
+import { RecipeFormModal } from '../recipes/RecipeFormModal'
 import { PlanSummary } from './PlanSummary'
 import { PlanTable } from './PlanTable'
 import { RecipeModal } from './RecipeModal'
@@ -42,6 +43,7 @@ export function PlanView({ onEditSetup, onGoToGrocery }) {
   } = useMealPlan()
 
   const [openRecipe, setOpenRecipe] = useState(null)
+  const [editRecipe, setEditRecipe] = useState(null)
   const summary = usePlanSummary(currentWeek)
 
   const empty = isWeekEmpty(plan, currentWeek)
@@ -96,6 +98,13 @@ export function PlanView({ onEditSetup, onGoToGrocery }) {
         </button>
         <button type="button" className="button" onClick={() => clearWeek(currentWeek)}>
           Clear this week
+        </button>
+        <button
+          type="button"
+          className="button"
+          onClick={() => setEditRecipe({ recipe: null })}
+        >
+          Add your own recipe
         </button>
       </div>
 
@@ -209,13 +218,31 @@ export function PlanView({ onEditSetup, onGoToGrocery }) {
             Red text in Check means something needs fixing. The grey line is
             calories and protein per person for that day.
           </li>
+          <li>
+            Your own recipes show up in every dropdown they fit, marked
+            &ldquo;yours&rdquo;. Add one here, or manage them all in Setup.
+          </li>
         </ul>
       </section>
 
       <SafetyDisclaimer />
 
       {openRecipe ? (
-        <RecipeModal {...openRecipe} onClose={() => setOpenRecipe(null)} />
+        <RecipeModal
+          {...openRecipe}
+          onClose={() => setOpenRecipe(null)}
+          onEditRecipe={(recipe) => {
+            setOpenRecipe(null)
+            setEditRecipe({ recipe })
+          }}
+        />
+      ) : null}
+
+      {editRecipe ? (
+        <RecipeFormModal
+          recipe={editRecipe.recipe}
+          onClose={() => setEditRecipe(null)}
+        />
       ) : null}
     </>
   )
